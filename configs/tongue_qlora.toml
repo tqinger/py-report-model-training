@@ -1,0 +1,48 @@
+# All QLoRA training hyperparameters live here. Runtime paths and checkpoint
+# selection remain command-line options of scripts/train_tongue_qlora.py.
+
+[quantization]
+load_in_4bit = true
+bnb_4bit_quant_type = "nf4"
+bnb_4bit_use_double_quant = true
+bnb_4bit_compute_dtype = "bfloat16"
+torch_dtype = "bfloat16"
+
+[lora]
+r = 16
+alpha = 32
+dropout = 0.05
+target_modules = [
+  "q_proj",
+  "k_proj",
+  "v_proj",
+  "o_proj",
+  "gate_proj",
+  "up_proj",
+  "down_proj",
+]
+
+[training]
+seed = 20260729
+max_length = 2048
+num_train_epochs = 3.0
+learning_rate = 5e-5
+per_device_train_batch_size = 1
+per_device_eval_batch_size = 1
+gradient_accumulation_steps = 8
+warmup_ratio = 0.05
+max_grad_norm = 1.0
+optim = "paged_adamw_8bit"
+eval_strategy = "epoch"
+save_strategy = "epoch"
+logging_strategy = "steps"
+logging_steps = 10
+save_total_limit = 2
+load_best_model_at_end = true
+metric_for_best_model = "eval_loss"
+greater_is_better = false
+bf16 = true
+tf32 = true
+gradient_checkpointing = true
+gradient_checkpointing_use_reentrant = false
+report_to = "none"

@@ -8,5 +8,5 @@ __pycache__/
 artifacts/
 models/
 adapters/
-output/
+outputs/
 data/

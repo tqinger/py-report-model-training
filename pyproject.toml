@@ -1,15 +1,15 @@
 [project]
 name = "tcm-qwen-evaluation"
 version = "0.1.0"
-description = "Reproducible Qwen3 baseline evaluation and QLoRA training for TCM text tasks"
+description = "Reproducible Qwen3 QLoRA training and evaluation for tongue-analysis tasks"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "accelerate>=1.7,<2",
     "bitsandbytes>=0.46,<1",
     "datasets>=3.6,<4",
+    "huggingface-hub>=0.36,<1",
     "openpyxl>=3.1,<4",
-    "pandas>=2.2,<3",
     "peft>=0.15,<1",
     "safetensors>=0.5,<1",
     "torch==2.7.1",
@@ -37,4 +37,3 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-

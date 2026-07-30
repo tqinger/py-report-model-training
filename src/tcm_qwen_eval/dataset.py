@@ -4,11 +4,9 @@ import hashlib
 import json
 import os
 import random
-from collections import Counter, defaultdict
-from collections.abc import Iterable
-from dataclasses import asdict, dataclass
+from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 EXPECTED_ROLES = ("system", "user", "assistant")
 ACTUAL_TRAINING_DATA_DIR = Path(r"D:\shanjiyun\py-report-system\data\training\llm_calls")
@@ -130,37 +128,10 @@ def load_examples(data_dir: Path) -> list[Example]:
     return examples
 
 
-def audit_examples(examples: Iterable[Example]) -> list[dict[str, Any]]:
-    grouped: dict[str, list[Example]] = defaultdict(list)
-    for example in examples:
-        grouped[example.domain].append(example)
-
-    rows: list[dict[str, Any]] = []
-    for domain, items in sorted(grouped.items()):
-        input_counts = Counter(item.user for item in items)
-        pair_counts = Counter((item.user, item.reference) for item in items)
-        lengths = sorted(sum(len(message["content"]) for message in item.messages) for item in items)
-        p95_index = max(0, int((len(lengths) - 1) * 0.95))
-        rows.append(
-            {
-                "领域": domain,
-                "样本数": len(items),
-                "任务数": len({item.task for item in items}),
-                "唯一输入数": len(input_counts),
-                "重复输入行数": sum(count - 1 for count in input_counts.values()),
-                "完全重复样本行数": sum(count - 1 for count in pair_counts.values()),
-                "分组数": len({item.group_id for item in items}),
-                "总字符数中位数": lengths[len(lengths) // 2],
-                "总字符数P95": lengths[p95_index],
-                "总字符数最大值": lengths[-1],
-            }
-        )
-    return rows
-
-
-def select_baseline_examples(
-    examples: Iterable[Example], samples_per_task: int = 5, seed: int = 20260729
+def select_representative_examples(
+    examples: list[Example], samples_per_task: int = 5, seed: int = 20260729
 ) -> list[Example]:
+    """Select deterministic, source-distinct examples for manual review."""
     by_task: dict[str, list[Example]] = defaultdict(list)
     for example in examples:
         by_task[example.task].append(example)
@@ -182,7 +153,7 @@ def select_baseline_examples(
 
 
 def grouped_split(
-    examples: Iterable[Example], seed: int = 20260729
+    examples: list[Example], seed: int = 20260729
 ) -> dict[str, list[str]]:
     """Return a deterministic 80/10/10 split at source-group level for later SFT."""
     group_ids = sorted({item.group_id for item in examples})
@@ -195,18 +166,3 @@ def grouped_split(
         "validation": group_ids[train_end:validation_end],
         "test": group_ids[validation_end:],
     }
-
-
-def write_selection(path: Path, selected: Iterable[Example], split: dict[str, list[str]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "selection_version": 1,
-        "selected_examples": [asdict(example) for example in selected],
-        "future_grouped_split": split,
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def read_selection(path: Path) -> list[Example]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    return [Example(**item) for item in payload["selected_examples"]]

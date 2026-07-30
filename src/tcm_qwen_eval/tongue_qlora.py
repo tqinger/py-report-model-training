@@ -12,7 +12,7 @@ from typing import Any
 import torch
 from torch.utils.data import Dataset
 
-from tcm_qwen_eval.dataset import Example, grouped_split, select_baseline_examples
+from tcm_qwen_eval.dataset import Example, grouped_split, select_representative_examples
 
 TONGUE_DOMAIN = "tongue-analysis"
 TONGUE_TASKS = ("tongue_integrated_analysis", "tongue_daily_advice")
@@ -160,7 +160,7 @@ def token_length_summary(records: list[dict[str, list[int]]]) -> dict[str, int]:
 
 def choose_manual_examples(test_examples: list[Example], seed: int = DEFAULT_SEED) -> list[Example]:
     """Choose five source-distinct, held-out examples per tongue subtask."""
-    return select_baseline_examples(test_examples, samples_per_task=5, seed=seed)
+    return select_representative_examples(test_examples, samples_per_task=5, seed=seed)
 
 
 def tongue_format_check(task: str, output: str) -> tuple[bool, str]:

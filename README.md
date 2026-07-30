@@ -1,4 +1,4 @@
-# Qwen3 中医文本基线与 QLoRA 训练
+# Qwen3 舌象 QLoRA 训练与评测
 
 ## 舌象 QLoRA 微调
 
@@ -78,7 +78,19 @@ uv run python scripts/train_tongue_qlora.py --config configs/tongue_qlora_local.
 
 模型默认只从本机 Hugging Face 缓存读取；缓存缺失时在命令末尾添加 `--allow-download`。
 
-本项目先对四类中医文本任务进行未微调 Qwen3 零样本测试，再为后续四个 QLoRA Adapter 提供可复现的数据切分与环境。默认数据源为 `D:\shanjiyun\py-report-system\data\training\llm_calls`；可用 `TCM_TRAINING_DATA_DIR` 或 `--data-dir` 覆盖。
+### 下载基座权重
+
+使用下载脚本可将指定参数量的 Qwen3 权重下载到训练和评测共用的 `artifacts/hf_cache`。支持 `0.6B`、`1.7B` 和 `4B`，默认下载训练所需的 `4B`：
+
+```powershell
+uv run python scripts/download_qwen3_weights.py --size 4B
+```
+
+下载较小模型时替换参数量，例如：
+
+```powershell
+uv run python scripts/download_qwen3_weights.py --size 1.7B
+```
 
 ## 环境
 
@@ -92,34 +104,8 @@ uv run python -c "import torch; print(torch.__version__, torch.cuda.is_available
 
 若驱动与 CUDA 12.6 wheel 不兼容，先升级 NVIDIA 驱动；不要退回系统 Python 或 CPU 版 PyTorch。
 
-## 基线测试
-
-```powershell
-uv run python scripts/prepare_baseline.py
-uv run python scripts/run_baseline.py
-```
-
-默认顺序测试 `Qwen/Qwen3-0.6B`、`Qwen/Qwen3-1.7B` 和 `Qwen/Qwen3-4B`：每个模型覆盖 11 个子任务、每个子任务 5 条固定样本。模型权重会按 Hugging Face 默认缓存目录下载，且不会写入仓库。
-
-若 4B BF16 权重加载出现显存不足，使用：
-
-```powershell
-uv run python scripts/run_baseline.py --load-in-4bit
-```
-
-默认结果位于 `artifacts/qwen3_baseline.xlsx`。“样本对比”每行是一组固定样本：仅记录实际传入的用户提示词、参考答案及三个模型的并列输出，不记录固定 system prompt。在“人工评分”表对同一行的三模型分别填写四项 0–5 分后，Excel 会自动更新汇总分数。
-
-已生成旧版纵向结果时，可不重新推理，直接转换为并列对比表：
-
-```powershell
-uv run python scripts/reformat_baseline_workbook.py
-```
-
-该命令默认生成 `artifacts/qwen3_baseline_side_by_side.xlsx`，避免覆盖可能正在 Excel 中打开的旧文件。
-
 ## 数据与微调约束
 
-- `prepare_baseline.py` 同时保存 `artifacts/baseline_selection.json`，其中包含未来 SFT 的病例分组 80/10/10 切分。
-- 微调使用同一 Qwen3-4B 底座的四个领域 QLoRA Adapter；不可将分组拆散到训练和测试集。
+- 训练仅使用 `data/tongue-analysis` 中的两项舌象任务。
+- 同一舌象来源不可被拆散到训练、验证或测试集。
 - 建议设置为 NF4、BF16 compute、rank 16、alpha 32、dropout 0.05、最大长度 2048、batch size 1 加梯度累积。
-- 不在当前阶段运行微调；本轮 Excel 只反映预训练/官方对齐权重的零样本能力。

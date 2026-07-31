@@ -134,7 +134,7 @@ uv run python scripts/train_tongue_qlora.py `
 
 ## 环境
 
-所有环境操作均使用 `uv`。项目固定 Python 3.12，并从 PyTorch CUDA 12.6 索引安装 GPU 版 PyTorch：
+所有环境操作均使用 `uv`。项目固定 Python 3.12，并从 PyTorch CUDA 12.8 索引安装 GPU 版 PyTorch；该构建支持 RTX 50 系列所需的 `sm_120` 架构：
 
 ```powershell
 uv python install 3.12
@@ -142,7 +142,7 @@ uv sync --group dev
 uv run python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
 
-若驱动与 CUDA 12.6 wheel 不兼容，先升级 NVIDIA 驱动；不要退回系统 Python 或 CPU 版 PyTorch。
+若驱动与 CUDA 12.8 wheel 不兼容，先升级 NVIDIA 驱动；不要退回系统 Python 或 CPU 版 PyTorch。
 
 ## 数据与微调约束
 

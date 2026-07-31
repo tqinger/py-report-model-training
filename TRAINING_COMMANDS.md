@@ -9,6 +9,12 @@ uv sync --group dev
 uv run python scripts/download_qwen3_weights.py --size 4B
 ```
 
+项目固定使用 PyTorch CUDA 12.8 wheel，可同时支持 Windows 与 Linux；RTX 50 系列服务器应在同步后确认 `torch.cuda.get_arch_list()` 包含 `sm_120`：
+
+```powershell
+uv run python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.get_arch_list())"
+```
+
 若权重尚未下载，也可在前台命令末尾添加 `--allow-download`，或在后台命令末尾添加 `-AllowDownload`。
 
 ## 原始舌象数据

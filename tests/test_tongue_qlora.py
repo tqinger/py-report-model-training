@@ -103,6 +103,7 @@ def test_format_check_has_task_specific_constraints():
     assert tongue_format_check("tongue_daily_advice", "调" * 60)[0]
     assert not tongue_format_check("tongue_daily_advice", "调" * 59)[0]
     assert tongue_format_check("tongue_integrated_analysis", "调" * 50 + "。" + "养" * 49 + "。")[0]
+    assert tongue_format_check("tongue_combined_analysis", "分析" * 80 + "建议" * 20)[0]
 
 
 def test_evaluation_workbook_contains_dynamic_data_and_blank_score_columns(tmp_path: Path):

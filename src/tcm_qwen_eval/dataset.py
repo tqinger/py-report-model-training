@@ -4,12 +4,17 @@ import hashlib
 import json
 import os
 import random
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
 EXPECTED_ROLES = ("system", "user", "assistant")
 ACTUAL_TRAINING_DATA_DIR = Path(r"D:\shanjiyun\py-report-system\data\training\llm_calls")
+CONVERSATIONS_DIRECTORY = "conversations"
+TONGUE_DOMAIN = "tongue-analysis"
+TONGUE_COMBINED_TASK = "tongue_combined_analysis"
+CONVERSATION_FILENAME = re.compile(r"tongue-(?P<combination>\d+)-r(?P<round>0[1-9]|10)-without")
 
 
 def default_data_dir() -> Path:
@@ -95,34 +100,67 @@ def _hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def load_examples(data_dir: Path) -> list[Example]:
+def _normalized_messages(path: Path) -> list[dict[str, str]]:
+    with path.open(encoding="utf-8") as handle:
+        record = json.load(handle)
+    messages = record.get("messages")
+    if not isinstance(messages, list) or tuple(item.get("role") for item in messages) != EXPECTED_ROLES:
+        raise ValueError(f"{path}: expected system/user/assistant messages")
+    normalized = [
+        {"role": message["role"], "content": str(message.get("content", "")).strip()}
+        for message in messages
+    ]
+    if any(not message["content"] for message in normalized):
+        raise ValueError(f"{path}: empty message content")
+    return normalized
+
+
+def _load_conversation_examples(data_dir: Path) -> list[Example]:
+    """Load the flat, exhaustive tongue-combination conversation dataset."""
     examples: list[Example] = []
-    for domain_dir in sorted(path for path in data_dir.iterdir() if path.is_dir()):
-        domain = domain_dir.name
-        for path in sorted(domain_dir.glob("*.json")):
-            with path.open(encoding="utf-8") as handle:
-                record = json.load(handle)
-            messages = record.get("messages")
-            if not isinstance(messages, list) or tuple(item.get("role") for item in messages) != EXPECTED_ROLES:
-                raise ValueError(f"{path}: expected system/user/assistant messages")
-            normalized = [
-                {"role": message["role"], "content": str(message.get("content", "")).strip()}
-                for message in messages
-            ]
-            if any(not message["content"] for message in normalized):
-                raise ValueError(f"{path}: empty message content")
-            user = normalized[1]["content"]
-            task = _task_name(domain, user)
-            group_id = f"{domain}-{_hash(_group_source(domain, user))[:16]}"
-            examples.append(
-                Example(
-                    id=f"{domain}/{path.stem}",
-                    domain=domain,
-                    task=task,
-                    group_id=group_id,
-                    messages=normalized,
-                )
+    for path in sorted(data_dir.glob("*.json")):
+        match = CONVERSATION_FILENAME.fullmatch(path.stem)
+        if not match:
+            raise ValueError(
+                f"{path}: expected a filename like tongue-00000-r01-without.json"
             )
+        examples.append(
+            Example(
+                id=f"{TONGUE_DOMAIN}/{path.stem}",
+                domain=TONGUE_DOMAIN,
+                task=TONGUE_COMBINED_TASK,
+                group_id=f"{TONGUE_DOMAIN}-{match['combination']}",
+                messages=_normalized_messages(path),
+            )
+        )
+    return examples
+
+
+def load_examples(data_dir: Path) -> list[Example]:
+    """Load either the original domain directories or the flat conversations dataset."""
+    if data_dir.name == CONVERSATIONS_DIRECTORY:
+        examples = _load_conversation_examples(data_dir)
+    else:
+        examples = []
+        for domain_dir in sorted(path for path in data_dir.iterdir() if path.is_dir()):
+            # Conversations are an alternative data root, not part of the legacy multi-domain set.
+            if domain_dir.name == CONVERSATIONS_DIRECTORY:
+                continue
+            domain = domain_dir.name
+            for path in sorted(domain_dir.glob("*.json")):
+                normalized = _normalized_messages(path)
+                user = normalized[1]["content"]
+                task = _task_name(domain, user)
+                group_id = f"{domain}-{_hash(_group_source(domain, user))[:16]}"
+                examples.append(
+                    Example(
+                        id=f"{domain}/{path.stem}",
+                        domain=domain,
+                        task=task,
+                        group_id=group_id,
+                        messages=normalized,
+                    )
+                )
     if not examples:
         raise ValueError(f"No JSON examples found in {data_dir}")
     return examples

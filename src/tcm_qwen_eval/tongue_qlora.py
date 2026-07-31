@@ -12,15 +12,21 @@ from typing import Any
 import torch
 from torch.utils.data import Dataset
 
-from tcm_qwen_eval.dataset import Example, grouped_split, select_representative_examples
+from tcm_qwen_eval.dataset import (
+    CONVERSATION_FILENAME,
+    TONGUE_COMBINED_TASK,
+    TONGUE_DOMAIN,
+    Example,
+    grouped_split,
+    select_representative_examples,
+)
 
-TONGUE_DOMAIN = "tongue-analysis"
-TONGUE_TASKS = ("tongue_integrated_analysis", "tongue_daily_advice")
+TONGUE_TASKS = ("tongue_integrated_analysis", "tongue_daily_advice", TONGUE_COMBINED_TASK)
 DEFAULT_SEED = 20260729
 
 
 def tongue_examples(examples: list[Example]) -> list[Example]:
-    """Return only the two stateless tongue-analysis tasks."""
+    """Return only supported tongue-analysis tasks."""
     selected = [example for example in examples if example.domain == TONGUE_DOMAIN]
     unexpected = {example.task for example in selected} - set(TONGUE_TASKS)
     if unexpected:
@@ -30,9 +36,42 @@ def tongue_examples(examples: list[Example]) -> list[Example]:
     return selected
 
 
+def _conversation_round(example: Example) -> int:
+    filename = example.id.rsplit("/", maxsplit=1)[-1]
+    match = CONVERSATION_FILENAME.fullmatch(filename)
+    if not match:
+        raise ValueError(f"{example.id}: expected a conversations dataset filename")
+    return int(match["round"])
+
+
+def _split_conversation_rounds(examples: list[Example]) -> dict[str, list[Example]]:
+    """Keep every combination in every split by assigning its ten rounds deterministically."""
+    by_group: dict[str, list[Example]] = defaultdict(list)
+    for example in examples:
+        by_group[example.group_id].append(example)
+
+    expected_rounds = set(range(1, 11))
+    result = {"train": [], "validation": [], "test": []}
+    for group_id, group_examples in sorted(by_group.items()):
+        rounds = {_conversation_round(example) for example in group_examples}
+        if len(group_examples) != 10 or rounds != expected_rounds:
+            raise ValueError(
+                f"{group_id}: expected exactly one sample for each round r01 through r10"
+            )
+        for example in group_examples:
+            split_name = "train" if _conversation_round(example) <= 8 else "validation"
+            if _conversation_round(example) == 10:
+                split_name = "test"
+            result[split_name].append(example)
+    return result
+
+
 def split_tongue_examples(examples: list[Example], seed: int = DEFAULT_SEED) -> dict[str, list[Example]]:
-    """Create an 80/10/10 split without leaking a tongue-source group."""
+    """Split original data by source, or exhaustive conversation data by its numbered rounds."""
     selected = tongue_examples(examples)
+    if {example.task for example in selected} == {TONGUE_COMBINED_TASK}:
+        return _split_conversation_rounds(selected)
+
     groups = grouped_split(selected, seed)
     result = {
         split_name: [example for example in selected if example.group_id in group_ids]
@@ -45,11 +84,18 @@ def split_tongue_examples(examples: list[Example], seed: int = DEFAULT_SEED) -> 
 
 
 def split_manifest(splits: dict[str, list[Example]], seed: int) -> dict[str, Any]:
-    """Return an auditable, deterministic record of the source-level split."""
+    """Return an auditable, deterministic record of the selected split strategy."""
+    tasks = {example.task for rows in splits.values() for example in rows}
+    combined_only = tasks == {TONGUE_COMBINED_TASK}
     return {
         "seed": seed,
         "domain": TONGUE_DOMAIN,
-        "tasks": list(TONGUE_TASKS),
+        "tasks": sorted(tasks),
+        "split_strategy": (
+            "per-combination rounds r01-r08/train, r09/validation, r10/test"
+            if combined_only
+            else "source-grouped 80/10/10"
+        ),
         "splits": {
             name: {
                 "example_count": len(items),
@@ -177,4 +223,7 @@ def tongue_format_check(task: str, output: str) -> tuple[bool, str]:
         sentence_count = len(re.findall(r"[。！？]", text))
         no_title = not text.startswith(("舌面综合分析", "综合分析"))
         return 100 <= len(text) <= 120 and 2 <= sentence_count <= 3 and no_title, "要求 100–120 字、2–3 句、无标题"
+    if task == TONGUE_COMBINED_TASK:
+        has_advice = any(marker in text for marker in ("建议", "宜", "应"))
+        return 120 <= len(text) <= 600 and has_advice, "要求包含分析与调养建议，且长度为 120–600 字"
     raise ValueError(f"Unsupported tongue task: {task}")

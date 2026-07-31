@@ -121,6 +121,10 @@ def main() -> None:
             base_outputs[example.id] = generate(model, tokenizer, example.messages, args.max_new_tokens)
             print(f"[base {index}/{len(manual_examples)}] {example.task}", flush=True)
 
+    source_data_dir = args.data_dir
+    if args.data_dir.name != "conversations":
+        source_data_dir /= "tongue-analysis"
+
     write_json(args.predictions_output, predictions)
     write_tongue_evaluation_workbook(
         args.output,
@@ -128,7 +132,7 @@ def main() -> None:
         base_outputs,
         adapter_outputs,
         predictions,
-        args.data_dir / "tongue-analysis",
+        source_data_dir,
         {
             "基座模型": args.model,
             "基座权重来源": model_source,

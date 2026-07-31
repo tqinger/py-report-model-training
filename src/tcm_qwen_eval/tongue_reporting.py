@@ -87,7 +87,7 @@ def write_tongue_evaluation_workbook(
         results.append(
             [
                 task_label(example),
-                str(source_data_dir / f"{example.id}.json"),
+                str(source_data_dir / f"{example.id.rsplit('/', maxsplit=1)[-1]}.json"),
                 extract_dynamic_input(example),
                 base_outputs[example.id],
                 None,

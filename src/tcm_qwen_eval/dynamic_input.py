@@ -16,6 +16,7 @@ TASK_LABELS = {
     "report_part_5": "四诊报告｜日常调护建议",
     "tongue_daily_advice": "舌诊分析｜日常调养建议",
     "tongue_integrated_analysis": "舌诊分析｜综合分析",
+    "tongue_combined_analysis": "舌诊分析｜综合分析与调养建议",
 }
 
 
@@ -59,6 +60,10 @@ def _tongue_dynamic_input(user: str) -> str:
     parts = []
     if reference:
         parts.append(reference.group("value").strip())
+    else:
+        patient = re.search(r"患者信息：\s*(?P<value>.*?)\n舌象特征：", user, re.DOTALL)
+        if patient:
+            parts.append(patient.group("value").strip())
     parts.append(features)
     return "\n".join(parts)
 

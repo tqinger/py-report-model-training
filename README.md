@@ -1,5 +1,7 @@
 # Qwen3 舌象 QLoRA 训练与评测
 
+完整的前台、后台、日志与恢复训练命令见 [TRAINING_COMMANDS.md](TRAINING_COMMANDS.md)。
+
 ## 舌象 QLoRA 微调
 
 以本地 `data/tongue-analysis` 的两项舌象子任务合并训练一个 `Qwen/Qwen3-4B` Adapter。训练保留原始 system 和 user 消息作为上下文，但只对 assistant 回复计算损失；同一舌象来源不会被拆到不同数据集。
@@ -90,6 +92,44 @@ uv run python scripts/download_qwen3_weights.py --size 4B
 
 ```powershell
 uv run python scripts/download_qwen3_weights.py --size 1.7B
+```
+
+### 全组合对话数据训练
+
+`data/conversations` 的 101,760 条样本覆盖 10,176 种舌象组合，每种组合含 `r01` 至 `r10` 十个患者信息变体。训练会保留每种组合，并固定将 `r01`–`r08` 用于训练、`r09` 用于验证、`r10` 用于测试：
+
+```powershell
+uv run python scripts/train_tongue_qlora.py `
+  --config configs/tongue_qlora_conversations.toml `
+  --data-dir data/conversations `
+  --output-dir artifacts/qwen3-4b-tongue-conversations-qlora
+```
+
+对应评测命令：
+
+```powershell
+uv run python scripts/evaluate_tongue_qlora.py `
+  --data-dir data/conversations `
+  --adapter artifacts/qwen3-4b-tongue-conversations-qlora `
+  --output artifacts/qwen3-4b-tongue-conversations-evaluation.xlsx `
+  --predictions-output artifacts/qwen3-4b-tongue-conversations-qlora/test_predictions.json
+```
+
+### 冒烟测试数据
+
+以下命令会按固定种子抽取 10 个完整组合，并复制到 `data/smoke/conversations`。该小集共 100 条样本，切分后含 80 条训练、10 条验证和 10 条测试样本；不会修改原始数据：
+
+```powershell
+uv run python scripts/prepare_conversations_smoke_data.py
+```
+
+使用同一份配置验证完整训练链路，并将冒烟产物写入独立目录：
+
+```powershell
+uv run python scripts/train_tongue_qlora.py `
+  --config configs/tongue_qlora_conversations.toml `
+  --data-dir data/smoke/conversations `
+  --output-dir artifacts/qwen3-4b-tongue-conversations-smoke
 ```
 
 ## 环境

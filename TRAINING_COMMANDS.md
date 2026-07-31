@@ -1,6 +1,6 @@
 # 训练启动命令
 
-以下命令均应在项目根目录 `D:\shanjiyun\py-report-model-training` 的 PowerShell 中运行。前台训练需要设置 `PYTHONPATH`；后台启动器会自动处理该环境变量。
+以下命令均应在项目根目录运行。Windows PowerShell 的前台训练需要设置 `PYTHONPATH`；其 `.ps1` 后台启动器会自动处理该环境变量。Linux Bash 不支持该 `.ps1` 启动器，应使用下文的 `nohup` 命令。
 
 ## 首次准备
 
@@ -84,12 +84,68 @@ uv run python scripts/train_tongue_qlora.py `
   -OutputDir artifacts/qwen3-4b-tongue-conversations-smoke
 ```
 
+## Linux Bash 后台启动
+
+Linux 上不要执行 `./scripts/start_tongue_qlora_training.ps1`。使用 `nohup` 启动后，终端关闭也不会中断训练；`$!` 是后台进程 PID。
+
+### 原始舌象数据
+
+```bash
+timestamp=$(date +%Y%m%d-%H%M%S)
+mkdir -p artifacts/logs
+PYTHONPATH=src nohup uv run python -u scripts/train_tongue_qlora.py \
+  --config configs/tongue_qlora.toml \
+  --data-dir data \
+  --output-dir artifacts/qwen3-4b-tongue-qlora \
+  >"artifacts/logs/tongue_qlora_${timestamp}.out.log" \
+  2>"artifacts/logs/tongue_qlora_${timestamp}.err.log" \
+  </dev/null &
+echo "PID: $!"
+```
+
+### 全组合对话数据
+
+```bash
+timestamp=$(date +%Y%m%d-%H%M%S)
+mkdir -p artifacts/logs
+PYTHONPATH=src nohup uv run python -u scripts/train_tongue_qlora.py \
+  --config configs/tongue_qlora_conversations.toml \
+  --data-dir data/conversations \
+  --output-dir artifacts/qwen3-4b-tongue-conversations-qlora \
+  >"artifacts/logs/tongue_qlora_${timestamp}.out.log" \
+  2>"artifacts/logs/tongue_qlora_${timestamp}.err.log" \
+  </dev/null &
+echo "PID: $!"
+echo "Log: artifacts/logs/tongue_qlora_${timestamp}.out.log"
+```
+
+### 冒烟测试数据
+
+```bash
+timestamp=$(date +%Y%m%d-%H%M%S)
+mkdir -p artifacts/logs
+PYTHONPATH=src nohup uv run python -u scripts/train_tongue_qlora.py \
+  --config configs/tongue_qlora_conversations.toml \
+  --data-dir data/smoke/conversations \
+  --output-dir artifacts/qwen3-4b-tongue-conversations-smoke \
+  >"artifacts/logs/tongue_qlora_${timestamp}.out.log" \
+  2>"artifacts/logs/tongue_qlora_${timestamp}.err.log" \
+  </dev/null &
+echo "PID: $!"
+```
+
 ## 后台日志与恢复训练
 
 启动器会输出 PID，并在 `artifacts/logs/` 写入同一时间戳的 `.out.log` 和 `.err.log`。实时查看训练进度：
 
 ```powershell
 Get-Content -LiteralPath artifacts\logs\tongue_qlora_<timestamp>.out.log -Tail 50 -Wait
+```
+
+Linux Bash 实时查看日志：
+
+```bash
+tail -f artifacts/logs/tongue_qlora_<timestamp>.out.log
 ```
 
 从 checkpoint 恢复全组合训练：

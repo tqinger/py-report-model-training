@@ -1,6 +1,6 @@
-# QLoRA hyperparameters for the 76,320 cleaned tongue-analysis conversations
-# in data/conversations. A 1024-token context window comfortably covers the
-# system, user, and assistant messages without creating unnecessary padding.
+# QLoRA hyperparameters for Qwen/Qwen3-1.7B on the 76,320 cleaned conversations.
+# Batch size 4 with accumulation 2 keeps the effective batch size at 8, matching
+# the established 4B recipe while taking advantage of the smaller 4-bit base model.
 
 [quantization]
 load_in_4bit = true
@@ -24,14 +24,16 @@ target_modules = [
 ]
 
 [training]
-seed = 20260731
+seed = 20260803
 max_length = 1024
 num_train_epochs = 1.0
-learning_rate = 2e-5
-lr_scheduler_type = "linear"
-per_device_train_batch_size = 2
-per_device_eval_batch_size = 2
-gradient_accumulation_steps = 4
+learning_rate = 3e-5
+# During the scheduled training steps, decay on a half-cosine to a 6e-6 floor.
+lr_scheduler_type = "cosine_with_min_lr"
+lr_scheduler_kwargs = { min_lr_rate = 0.2 }
+per_device_train_batch_size = 8
+per_device_eval_batch_size = 8
+gradient_accumulation_steps = 1
 warmup_ratio = 0.03
 max_grad_norm = 1.0
 optim = "paged_adamw_8bit"

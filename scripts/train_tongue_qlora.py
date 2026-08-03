@@ -143,6 +143,8 @@ def main() -> None:
         greater_is_better=training.greater_is_better,
         learning_rate=training.learning_rate,
         num_train_epochs=training.num_train_epochs,
+        lr_scheduler_type=training.lr_scheduler_type,
+        lr_scheduler_kwargs=training.lr_scheduler_kwargs,
         per_device_train_batch_size=training.per_device_train_batch_size,
         per_device_eval_batch_size=training.per_device_eval_batch_size,
         gradient_accumulation_steps=training.gradient_accumulation_steps,

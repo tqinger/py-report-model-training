@@ -83,6 +83,8 @@ class TrainingHyperparameters:
     gradient_checkpointing: bool
     gradient_checkpointing_use_reentrant: bool
     report_to: str
+    lr_scheduler_type: str = "linear"
+    lr_scheduler_kwargs: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.max_length <= 0:
@@ -105,6 +107,23 @@ class TrainingHyperparameters:
             raise ValueError("training.logging_steps must be positive when logging_strategy is 'steps'")
         if self.save_total_limit <= 0:
             raise ValueError("training.save_total_limit must be positive")
+        if not self.lr_scheduler_type:
+            raise ValueError("training.lr_scheduler_type must not be empty")
+        if self.lr_scheduler_kwargs is not None and not isinstance(self.lr_scheduler_kwargs, dict):
+            raise ValueError("training.lr_scheduler_kwargs must be a TOML inline table or omitted")
+        if self.lr_scheduler_type == "cosine_with_min_lr":
+            scheduler_kwargs = self.lr_scheduler_kwargs or {}
+            if "min_lr" in scheduler_kwargs or "min_lr_rate" not in scheduler_kwargs:
+                raise ValueError(
+                    "training.cosine_with_min_lr requires only lr_scheduler_kwargs.min_lr_rate"
+                )
+            min_lr_rate = scheduler_kwargs["min_lr_rate"]
+            if (
+                not isinstance(min_lr_rate, (int, float))
+                or isinstance(min_lr_rate, bool)
+                or not 0 <= min_lr_rate <= 1
+            ):
+                raise ValueError("training.lr_scheduler_kwargs.min_lr_rate must be in [0, 1]")
         if self.load_best_model_at_end and self.eval_strategy != self.save_strategy:
             raise ValueError(
                 "training.eval_strategy and training.save_strategy must match when "

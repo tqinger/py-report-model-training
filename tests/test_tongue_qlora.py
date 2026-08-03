@@ -46,6 +46,16 @@ def test_tongue_qlora_hyperparameters_are_loaded_from_toml_config():
     assert config.quantization.bnb_4bit_compute_dtype == "bfloat16"
 
 
+def test_conversations_1_7b_config_uses_a_learning_rate_floor():
+    config = load_tongue_qlora_config(Path("configs/tongue_qlora_conversations_1_7b.toml"))
+
+    assert config.training.learning_rate == 3e-5
+    assert config.training.lr_scheduler_type == "cosine_with_min_lr"
+    assert config.training.lr_scheduler_kwargs == {"min_lr_rate": 0.2}
+    assert config.training.per_device_train_batch_size == 4
+    assert config.training.gradient_accumulation_steps == 2
+
+
 def test_tongue_qlora_config_rejects_incompatible_save_and_eval_strategies(tmp_path: Path):
     config_path = tmp_path / "invalid.toml"
     config_path.write_text(

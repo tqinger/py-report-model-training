@@ -68,6 +68,20 @@ PYTHONPATH=src uv run python scripts/train_tongue_qlora.py \
   -OutputDir artifacts/qwen3-4b-tongue-conversations-qlora
 ```
 
+### Qwen3-1.7B（后台启动并记录日志）
+
+```powershell
+uv run python scripts/download_qwen3_weights.py --size 1.7B
+
+.\scripts\start_tongue_qlora_training.ps1 `
+  -Config configs/tongue_qlora_conversations_1_7b.toml `
+  -DataDir data/conversations `
+  -Model Qwen/Qwen3-1.7B `
+  -OutputDir artifacts/qwen3-1.7b-tongue-conversations-qlora
+```
+
+启动器会将本次训练的标准输出和错误输出分别写入 `artifacts/logs/` 下带时间戳的 `.out.log`、`.err.log` 文件。
+
 ## 冒烟测试数据
 
 先准备 100 条冒烟数据（10 个完整组合）：
@@ -129,6 +143,12 @@ PYTHONPATH=src nohup uv run python -u scripts/train_tongue_qlora.py \
 echo "PID: $!"
 echo "Log: artifacts/logs/tongue_qlora_${timestamp}.out.log"
 ```
+
+PYTHONPATH=src uv run python -u scripts/train_tongue_qlora.py \
+  --config configs/tongue_qlora_conversations.toml \
+  --data-dir data/conversations \
+  --output-dir artifacts/qwen3-4b-tongue-conversations-qlora
+
 
 ### 冒烟测试数据
 

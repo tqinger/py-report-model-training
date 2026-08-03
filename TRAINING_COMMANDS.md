@@ -53,6 +53,11 @@ uv run python scripts/train_tongue_qlora.py `
   --data-dir data/conversations `
   --output-dir artifacts/qwen3-4b-tongue-conversations-qlora
 ```
+PYTHONPATH=src uv run python scripts/train_tongue_qlora.py \
+    --config configs/tongue_qlora_conversations.toml \
+    --data-dir data/conversations \
+    --output-dir artifacts/qwen3-4b-tongue-conversations-qlora
+
 
 ### 后台启动
 

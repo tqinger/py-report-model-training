@@ -15,6 +15,54 @@ uv run python scripts/download_qwen3_weights.py --size 4B
 uv run python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.get_arch_list())"
 ```
 
+## 体质分析（Qwen3-4B）
+
+数据源：`data/constitution-analysis`。训练入口会将每条 JSON 响应作为一个综合体质分析任务，并按体质辨识信息来源分组，以 80/10/10 切分训练、验证和测试集。
+
+### Windows PowerShell 前台训练
+
+```powershell
+$env:PYTHONPATH = "src"
+uv run python scripts/train_constitution_qlora.py `
+  --config configs/constitution_qlora.toml `
+  --data-dir data/constitution-analysis `
+  --output-dir artifacts/qwen3-4b-constitution-qlora
+```
+
+### Windows PowerShell 后台训练
+
+```powershell
+.\scripts\start_constitution_qlora_training.ps1 `
+  -Config configs/constitution_qlora.toml `
+  -DataDir data/constitution-analysis `
+  -OutputDir artifacts/qwen3-4b-constitution-qlora
+```
+
+### Ubuntu Bash 前台训练
+
+```bash
+PYTHONPATH=src uv run python scripts/train_constitution_qlora.py \
+  --config configs/constitution_qlora.toml \
+  --data-dir data/constitution-analysis \
+  --output-dir artifacts/qwen3-4b-constitution-qlora
+```
+
+### Ubuntu Bash 后台训练
+
+```bash
+timestamp=$(date +%Y%m%d-%H%M%S)
+mkdir -p artifacts/logs
+PYTHONPATH=src nohup uv run python -u scripts/train_constitution_qlora.py \
+  --config configs/constitution_qlora.toml \
+  --data-dir data/constitution-analysis \
+  --output-dir artifacts/qwen3-4b-constitution-qlora \
+  >"artifacts/logs/constitution_qlora_${timestamp}.out.log" \
+  2>"artifacts/logs/constitution_qlora_${timestamp}.err.log" \
+  </dev/null &
+echo "PID: $!"
+echo "Log: artifacts/logs/constitution_qlora_${timestamp}.out.log"
+```
+
 若权重尚未下载，也可在前台命令末尾添加 `--allow-download`，或在后台命令末尾添加 `-AllowDownload`。
 
 ## 原始舌象数据

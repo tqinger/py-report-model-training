@@ -2,7 +2,11 @@ import json
 from pathlib import Path
 
 from tcm_qwen_eval.dataset import grouped_split, load_examples
-from tcm_qwen_eval.tongue_qlora import split_tongue_examples
+from tcm_qwen_eval.tongue_qlora import (
+    split_constitution_examples,
+    split_manifest,
+    split_tongue_examples,
+)
 
 
 def _write_conversation(path: Path, round_number: int) -> None:
@@ -25,8 +29,8 @@ def _write_conversation(path: Path, round_number: int) -> None:
 
 def test_data_loads_and_has_expected_tasks():
     examples = load_examples(Path("data"))
-    assert len(examples) == 7664
-    assert len({example.task for example in examples}) == 11
+    assert len(examples) == 18725
+    assert len({example.task for example in examples}) == 9
 
 
 def test_grouped_split_is_complete_and_disjoint():
@@ -57,3 +61,18 @@ def test_conversations_data_uses_each_combination_in_all_three_splits(tmp_path: 
     }
     assert splits["validation"][0].id.endswith("-r09-without")
     assert splits["test"][0].id.endswith("-r10-without")
+
+
+def test_constitution_directory_loads_and_splits_without_source_leakage():
+    examples = load_examples(Path("data/constitution-analysis"))
+    splits = split_constitution_examples(examples)
+    groups = {name: {example.group_id for example in rows} for name, rows in splits.items()}
+
+    assert len(examples) == 11610
+    assert {example.domain for example in examples} == {"constitution-analysis"}
+    assert {example.task for example in examples} == {"constitution_combined_analysis"}
+    assert sum(len(rows) for rows in splits.values()) == len(examples)
+    assert not (groups["train"] & groups["validation"])
+    assert not (groups["train"] & groups["test"])
+    assert not (groups["validation"] & groups["test"])
+    assert split_manifest(splits, 20260729)["domain"] == "constitution-analysis"

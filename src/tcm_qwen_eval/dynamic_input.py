@@ -11,6 +11,7 @@ TASK_LABELS = {
     "constitution_manifestation": "体质分析｜体质表现",
     "constitution_regulation": "体质分析｜调理方向",
     "constitution_summary": "体质分析｜综合概括",
+    "constitution_combined_analysis": "体质分析｜JSON 综合分析",
     "report_parts_1_2": "四诊报告｜第一、二部分",
     "report_parts_3_4": "四诊报告｜第三、四部分",
     "report_part_5": "四诊报告｜日常调护建议",

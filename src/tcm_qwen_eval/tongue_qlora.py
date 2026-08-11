@@ -13,6 +13,7 @@ import torch
 from torch.utils.data import Dataset
 
 from tcm_qwen_eval.dataset import (
+    CONSTITUTION_COMBINED_TASK,
     CONVERSATION_FILENAME,
     TONGUE_COMBINED_TASK,
     TONGUE_DOMAIN,
@@ -22,18 +23,37 @@ from tcm_qwen_eval.dataset import (
 )
 
 TONGUE_TASKS = ("tongue_integrated_analysis", "tongue_daily_advice", TONGUE_COMBINED_TASK)
+CONSTITUTION_DOMAIN = "constitution-analysis"
+CONSTITUTION_TASKS = (
+    "constitution_manifestation",
+    "constitution_regulation",
+    "constitution_summary",
+    CONSTITUTION_COMBINED_TASK,
+)
 DEFAULT_SEED = 20260729
+
+
+def _domain_examples(
+    examples: list[Example], domain: str, supported_tasks: tuple[str, ...]
+) -> list[Example]:
+    """Return examples for one supported domain and validate their tasks."""
+    selected = [example for example in examples if example.domain == domain]
+    unexpected = {example.task for example in selected} - set(supported_tasks)
+    if unexpected:
+        raise ValueError(f"Unexpected {domain} tasks: {sorted(unexpected)}")
+    if not selected:
+        raise ValueError(f"No {domain} examples found")
+    return selected
 
 
 def tongue_examples(examples: list[Example]) -> list[Example]:
     """Return only supported tongue-analysis tasks."""
-    selected = [example for example in examples if example.domain == TONGUE_DOMAIN]
-    unexpected = {example.task for example in selected} - set(TONGUE_TASKS)
-    if unexpected:
-        raise ValueError(f"Unexpected tongue tasks: {sorted(unexpected)}")
-    if not selected:
-        raise ValueError("No tongue-analysis examples found")
-    return selected
+    return _domain_examples(examples, TONGUE_DOMAIN, TONGUE_TASKS)
+
+
+def constitution_examples(examples: list[Example]) -> list[Example]:
+    """Return only supported constitution-analysis tasks."""
+    return _domain_examples(examples, CONSTITUTION_DOMAIN, CONSTITUTION_TASKS)
 
 
 def _conversation_round(example: Example) -> int:
@@ -66,10 +86,15 @@ def _split_conversation_rounds(examples: list[Example]) -> dict[str, list[Exampl
     return result
 
 
-def split_tongue_examples(examples: list[Example], seed: int = DEFAULT_SEED) -> dict[str, list[Example]]:
-    """Split original data by source, or exhaustive conversation data by its numbered rounds."""
-    selected = tongue_examples(examples)
-    if {example.task for example in selected} == {TONGUE_COMBINED_TASK}:
+def _split_domain_examples(
+    examples: list[Example],
+    domain: str,
+    supported_tasks: tuple[str, ...],
+    seed: int,
+) -> dict[str, list[Example]]:
+    """Split examples by source, with the conversations round split where applicable."""
+    selected = _domain_examples(examples, domain, supported_tasks)
+    if domain == TONGUE_DOMAIN and {example.task for example in selected} == {TONGUE_COMBINED_TASK}:
         return _split_conversation_rounds(selected)
 
     groups = grouped_split(selected, seed)
@@ -79,17 +104,34 @@ def split_tongue_examples(examples: list[Example], seed: int = DEFAULT_SEED) -> 
     }
     all_ids = set().union(*(set(group_ids) for group_ids in groups.values()))
     if all_ids != {example.group_id for example in selected}:
-        raise ValueError("Tongue split does not cover every source group")
+        raise ValueError(f"{domain} split does not cover every source group")
     return result
+
+
+def split_tongue_examples(examples: list[Example], seed: int = DEFAULT_SEED) -> dict[str, list[Example]]:
+    """Split tongue examples by source, or conversation examples by their numbered rounds."""
+    return _split_domain_examples(examples, TONGUE_DOMAIN, TONGUE_TASKS, seed)
+
+
+def split_constitution_examples(
+    examples: list[Example], seed: int = DEFAULT_SEED
+) -> dict[str, list[Example]]:
+    """Split constitution-analysis examples by their shared source facts."""
+    return _split_domain_examples(examples, CONSTITUTION_DOMAIN, CONSTITUTION_TASKS, seed)
 
 
 def split_manifest(splits: dict[str, list[Example]], seed: int) -> dict[str, Any]:
     """Return an auditable, deterministic record of the selected split strategy."""
-    tasks = {example.task for rows in splits.values() for example in rows}
-    combined_only = tasks == {TONGUE_COMBINED_TASK}
+    all_examples = [example for rows in splits.values() for example in rows]
+    domains = {example.domain for example in all_examples}
+    if len(domains) != 1:
+        raise ValueError(f"Split manifest requires exactly one domain, got {sorted(domains)}")
+    domain = domains.pop()
+    tasks = {example.task for example in all_examples}
+    combined_only = domain == TONGUE_DOMAIN and tasks == {TONGUE_COMBINED_TASK}
     return {
         "seed": seed,
-        "domain": TONGUE_DOMAIN,
+        "domain": domain,
         "tasks": sorted(tasks),
         "split_strategy": (
             "per-combination rounds r01-r08/train, r09/validation, r10/test"

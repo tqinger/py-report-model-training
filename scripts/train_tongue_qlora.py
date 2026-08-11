@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from transformers import (
     set_seed,
 )
 
-from tcm_qwen_eval.dataset import load_examples
+from tcm_qwen_eval.dataset import Example, load_examples
 from tcm_qwen_eval.tongue_qlora import (
     CausalDataCollator,
     TokenizedSFTDataset,
@@ -29,26 +30,46 @@ from tcm_qwen_eval.tongue_qlora import (
 )
 from tcm_qwen_eval.training_config import load_tongue_qlora_config
 
+SplitExamples = Callable[[list[Example], int], dict[str, list[Example]]]
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Fine-tune a Qwen3-4B tongue adapter with QLoRA.")
+
+def parse_args(
+    *,
+    description: str,
+    default_config: Path,
+    default_data_dir: Path,
+    default_output_dir: Path,
+) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("configs/tongue_qlora.toml"),
+        default=default_config,
         help="TOML file that defines all QLoRA training hyperparameters.",
     )
-    parser.add_argument("--data-dir", type=Path, default=Path("data"))
+    parser.add_argument("--data-dir", type=Path, default=default_data_dir)
     parser.add_argument("--model", default="Qwen/Qwen3-4B")
-    parser.add_argument("--output-dir", type=Path, default=Path("artifacts/qwen3-4b-tongue-qlora"))
+    parser.add_argument("--output-dir", type=Path, default=default_output_dir)
     parser.add_argument("--resume-from-checkpoint", type=Path)
     parser.add_argument("--cache-dir", type=Path, default=Path("artifacts/hf_cache"))
     parser.add_argument("--allow-download", action="store_true", help="Allow Hugging Face downloads when cache is missing.")
     return parser.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
+def main(
+    *,
+    description: str = "Fine-tune a Qwen3-4B tongue adapter with QLoRA.",
+    default_config: Path = Path("configs/tongue_qlora.toml"),
+    default_data_dir: Path = Path("data"),
+    default_output_dir: Path = Path("artifacts/qwen3-4b-tongue-qlora"),
+    split_examples: SplitExamples = split_tongue_examples,
+) -> None:
+    args = parse_args(
+        description=description,
+        default_config=default_config,
+        default_data_dir=default_data_dir,
+        default_output_dir=default_output_dir,
+    )
     config = load_tongue_qlora_config(args.config)
     training = config.training
     if not torch.cuda.is_available():
@@ -56,7 +77,7 @@ def main() -> None:
     set_seed(training.seed)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    splits = split_tongue_examples(load_examples(args.data_dir), training.seed)
+    splits = split_examples(load_examples(args.data_dir), training.seed)
     write_json(args.output_dir / "split_manifest.json", split_manifest(splits, training.seed))
     model_source = resolve_model_source(args.model, args.cache_dir)
 

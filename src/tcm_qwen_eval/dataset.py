@@ -14,7 +14,11 @@ ACTUAL_TRAINING_DATA_DIR = Path(r"D:\shanjiyun\py-report-system\data\training\ll
 CONVERSATIONS_DIRECTORY = "conversations"
 TONGUE_DOMAIN = "tongue-analysis"
 TONGUE_COMBINED_TASK = "tongue_combined_analysis"
+CONSTITUTION_COMBINED_TASK = "constitution_combined_analysis"
 CONVERSATION_FILENAME = re.compile(r"tongue-(?P<combination>\d+)-r(?P<round>0[1-9]|10)-without")
+SUPPORTED_DOMAINS = frozenset(
+    {"case-polish", "constitution-analysis", "holistic-tcm-report", TONGUE_DOMAIN}
+)
 
 
 def default_data_dir() -> Path:
@@ -50,6 +54,8 @@ class Example:
 
 def _task_name(domain: str, user: str) -> str:
     first_line = user.splitlines()[0].strip()
+    if domain == "constitution-analysis" and first_line.startswith("根据以下体质辨识信息生成 JSON"):
+        return CONSTITUTION_COMBINED_TASK
     task_markers = {
         "case-polish": (
             ("前后重复", "deduplicate_polish"),
@@ -136,30 +142,42 @@ def _load_conversation_examples(data_dir: Path) -> list[Example]:
     return examples
 
 
+def _load_domain_examples(domain: str, paths: list[Path]) -> list[Example]:
+    """Load the JSON examples for one of the legacy report domains."""
+    if domain not in SUPPORTED_DOMAINS:
+        raise ValueError(f"Unsupported training-data domain: {domain}")
+    examples: list[Example] = []
+    for path in paths:
+        normalized = _normalized_messages(path)
+        user = normalized[1]["content"]
+        examples.append(
+            Example(
+                id=f"{domain}/{path.stem}",
+                domain=domain,
+                task=_task_name(domain, user),
+                group_id=f"{domain}-{_hash(_group_source(domain, user))[:16]}",
+                messages=normalized,
+            )
+        )
+    return examples
+
+
 def load_examples(data_dir: Path) -> list[Example]:
-    """Load either the original domain directories or the flat conversations dataset."""
+    """Load a legacy data root, one legacy domain, or the flat conversations dataset."""
     if data_dir.name == CONVERSATIONS_DIRECTORY:
         examples = _load_conversation_examples(data_dir)
     else:
-        examples = []
-        for domain_dir in sorted(path for path in data_dir.iterdir() if path.is_dir()):
-            # Conversations are an alternative data root, not part of the legacy multi-domain set.
-            if domain_dir.name == CONVERSATIONS_DIRECTORY:
-                continue
-            domain = domain_dir.name
-            for path in sorted(domain_dir.glob("*.json")):
-                normalized = _normalized_messages(path)
-                user = normalized[1]["content"]
-                task = _task_name(domain, user)
-                group_id = f"{domain}-{_hash(_group_source(domain, user))[:16]}"
-                examples.append(
-                    Example(
-                        id=f"{domain}/{path.stem}",
-                        domain=domain,
-                        task=task,
-                        group_id=group_id,
-                        messages=normalized,
-                    )
+        direct_paths = sorted(data_dir.glob("*.json"))
+        if direct_paths:
+            examples = _load_domain_examples(data_dir.name, direct_paths)
+        else:
+            examples = []
+            for domain_dir in sorted(path for path in data_dir.iterdir() if path.is_dir()):
+                # Conversations are an alternative data root, not part of the legacy multi-domain set.
+                if domain_dir.name == CONVERSATIONS_DIRECTORY:
+                    continue
+                examples.extend(
+                    _load_domain_examples(domain_dir.name, sorted(domain_dir.glob("*.json")))
                 )
     if not examples:
         raise ValueError(f"No JSON examples found in {data_dir}")

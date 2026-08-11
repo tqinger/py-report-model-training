@@ -40,7 +40,9 @@ per_device_eval_batch_size = 4
 gradient_accumulation_steps = 2
 warmup_ratio = 0.03
 max_grad_norm = 1.0
-optim = "paged_adamw_8bit"
+# Avoid the bitsandbytes paged optimizer, which uses CUDA Unified Memory.
+# Standard PyTorch AdamW removes that runtime path while retaining 4-bit QLoRA.
+optim = "adamw_torch"
 eval_strategy = "epoch"
 save_strategy = "epoch"
 logging_strategy = "steps"

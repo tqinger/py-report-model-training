@@ -1,7 +1,7 @@
 # QLoRA hyperparameters for Qwen/Qwen3-4B on the 11,610
 # constitution-analysis JSON conversations in data/constitution-analysis.
-# A per-device batch size of 2 with four accumulation steps yields an effective
-# batch size of 8 while remaining suitable for a 16 GB GPU. The Qwen3-4B
+# A 32 GB GPU can use a per-device batch size of 4 with two accumulation steps
+# while preserving the established effective batch size of 8. The Qwen3-4B
 # chat-template tokenization of the full dataset peaks at 507 tokens, so a
 # 512-token context window retains every training target without padding to
 # an unnecessarily large length.
@@ -32,10 +32,12 @@ seed = 20260811
 max_length = 512
 num_train_epochs = 3.0
 learning_rate = 2e-5
-lr_scheduler_type = "linear"
-per_device_train_batch_size = 2
-per_device_eval_batch_size = 2
-gradient_accumulation_steps = 4
+# Decay on a half-cosine schedule to a 4e-6 floor rather than zero.
+lr_scheduler_type = "cosine_with_min_lr"
+lr_scheduler_kwargs = { min_lr_rate = 0.2 }
+per_device_train_batch_size = 4
+per_device_eval_batch_size = 4
+gradient_accumulation_steps = 2
 warmup_ratio = 0.03
 max_grad_norm = 1.0
 optim = "paged_adamw_8bit"

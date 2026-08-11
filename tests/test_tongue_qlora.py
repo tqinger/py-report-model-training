@@ -88,6 +88,12 @@ def test_model_source_prefers_a_local_huggingface_snapshot(tmp_path: Path):
     assert resolve_model_source("Qwen/Qwen3-4B", tmp_path) == str(snapshot)
 
 
+def test_model_source_supports_a_hubless_huggingface_cache(tmp_path: Path):
+    snapshot = tmp_path / "models--Qwen--Qwen3-4B/snapshots/revision"
+    snapshot.mkdir(parents=True)
+    assert resolve_model_source("Qwen/Qwen3-4B", tmp_path) == str(snapshot)
+
+
 def test_sft_labels_mask_fixed_and_dynamic_prompt_tokens():
     example = next(item for item in load_examples(Path("data")) if item.task == "tongue_daily_advice")
     encoded = encode_sft_example(FakeTokenizer(), example, max_length=4096)

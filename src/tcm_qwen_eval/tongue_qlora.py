@@ -160,9 +160,17 @@ def resolve_model_source(model_name: str, cache_dir: Path) -> str:
     direct_path = Path(model_name)
     if direct_path.is_dir():
         return str(direct_path)
-    snapshot_root = cache_dir / "hub" / f"models--{model_name.replace('/', '--')}" / "snapshots"
-    snapshots = sorted(path for path in snapshot_root.iterdir() if path.is_dir()) if snapshot_root.is_dir() else []
-    return str(snapshots[-1]) if snapshots else model_name
+    model_cache_dir = f"models--{model_name.replace('/', '--')}"
+    snapshot_roots = (cache_dir / "hub" / model_cache_dir / "snapshots", cache_dir / model_cache_dir / "snapshots")
+    for snapshot_root in snapshot_roots:
+        snapshots = (
+            sorted(path for path in snapshot_root.iterdir() if path.is_dir())
+            if snapshot_root.is_dir()
+            else []
+        )
+        if snapshots:
+            return str(snapshots[-1])
+    return model_name
 
 
 def chat_prompt(tokenizer: Any, messages: list[dict[str, str]]) -> str:

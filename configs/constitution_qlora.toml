@@ -43,11 +43,14 @@ max_grad_norm = 1.0
 # Avoid the bitsandbytes paged optimizer, which uses CUDA Unified Memory.
 # Standard PyTorch AdamW removes that runtime path while retaining 4-bit QLoRA.
 optim = "adamw_torch"
-eval_strategy = "epoch"
-save_strategy = "epoch"
+eval_strategy = "steps"
+save_strategy = "steps"
 logging_strategy = "steps"
 logging_steps = 50
-save_total_limit = 2
+# Save a complete, resumable Trainer checkpoint every 200 optimizer steps.
+# The newest recovery checkpoint replaces the previous one; a distinct best model is retained.
+save_steps = 200
+save_total_limit = 1
 load_best_model_at_end = true
 metric_for_best_model = "eval_loss"
 greater_is_better = false

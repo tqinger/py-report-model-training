@@ -6,6 +6,7 @@ param(
     [string]$OutputDir = "artifacts/qwen3-4b-tongue-qlora",
     [string]$CacheDir = "artifacts/hf_cache",
     [string]$ResumeFromCheckpoint,
+    [switch]$ResumeLatest,
     [switch]$AllowDownload
 )
 
@@ -35,8 +36,14 @@ $arguments = @(
     "--cache-dir",
     $CacheDir
 )
+if ($ResumeFromCheckpoint -and $ResumeLatest) {
+    throw "Specify either -ResumeFromCheckpoint or -ResumeLatest, not both."
+}
 if ($ResumeFromCheckpoint) {
     $arguments += "--resume-from-checkpoint", $ResumeFromCheckpoint
+}
+elseif ($ResumeLatest) {
+    $arguments += "--resume-from-checkpoint"
 }
 if ($AllowDownload) {
     $arguments += "--allow-download"

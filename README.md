@@ -47,6 +47,10 @@ Get-Content -LiteralPath artifacts\logs\tongue_qlora_<timestamp>.err.log -Tail 5
   -AllowDownload
 ```
 
+在 TOML 中设置 `training.save_steps` 指定保存间隔。默认配置会滚动保留最新的可恢复
+checkpoint；任一 PowerShell 启动器附加 `-ResumeLatest` 即可自动从它恢复。若最佳验证
+checkpoint 与最新保存不同，Trainer 会额外保留该最佳 checkpoint。
+
 Adapter、训练配置、切分清单和最佳验证 checkpoint 均写入 `artifacts/qwen3-4b-tongue-qlora/`。评测会生成 `artifacts/qwen3-4b-tongue-qlora-evaluation.xlsx`：其中的“结果表”仅含动态输入、Qwen3-4B 基座/QLoRA 输出与空白人工评分列。
 
 ### 默认超参数

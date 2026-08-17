@@ -3,6 +3,7 @@ from pathlib import Path
 import torch
 from openpyxl import load_workbook
 
+from tcm_qwen_eval.checkpoints import resolve_resume_checkpoint
 from tcm_qwen_eval.dataset import load_examples
 from tcm_qwen_eval.tongue_qlora import (
     CausalDataCollator,
@@ -34,6 +35,8 @@ def test_tongue_qlora_hyperparameters_are_loaded_from_toml_config():
 
     assert config.training.learning_rate == 5e-5
     assert config.training.gradient_accumulation_steps == 8
+    assert config.training.save_steps == 100
+    assert config.training.save_total_limit == 1
     assert config.lora.target_modules == (
         "q_proj",
         "k_proj",
@@ -52,8 +55,21 @@ def test_conversations_1_7b_config_uses_a_learning_rate_floor():
     assert config.training.learning_rate == 3e-5
     assert config.training.lr_scheduler_type == "cosine_with_min_lr"
     assert config.training.lr_scheduler_kwargs == {"min_lr_rate": 0.2}
-    assert config.training.per_device_train_batch_size == 4
-    assert config.training.gradient_accumulation_steps == 2
+    assert config.training.per_device_train_batch_size == 8
+    assert config.training.gradient_accumulation_steps == 1
+
+
+def test_new_jsonl_task_configs_match_their_dataset_sequence_lengths():
+    expected = {
+        "tongue_constitution_50k_qlora.toml": 512,
+        "wutai_20_qlora.toml": 2048,
+        "holistic_50k_qlora.toml": 1536,
+    }
+
+    for filename, max_length in expected.items():
+        config = load_tongue_qlora_config(Path("configs") / filename)
+        assert config.training.max_length == max_length
+        assert config.training.optim == "adamw_torch"
 
 
 def test_tongue_qlora_config_rejects_incompatible_save_and_eval_strategies(tmp_path: Path):
@@ -61,7 +77,7 @@ def test_tongue_qlora_config_rejects_incompatible_save_and_eval_strategies(tmp_p
     config_path.write_text(
         Path("configs/tongue_qlora.toml")
         .read_text(encoding="utf-8")
-        .replace('save_strategy = "epoch"', 'save_strategy = "steps"'),
+        .replace('save_strategy = "steps"', 'save_strategy = "epoch"'),
         encoding="utf-8",
     )
 
@@ -71,6 +87,54 @@ def test_tongue_qlora_config_rejects_incompatible_save_and_eval_strategies(tmp_p
         assert "eval_strategy and training.save_strategy" in str(error)
     else:
         raise AssertionError("Expected incompatible save and evaluation strategies to be rejected")
+
+
+def test_tongue_qlora_config_rejects_non_positive_save_steps(tmp_path: Path):
+    config_path = tmp_path / "invalid.toml"
+    config_path.write_text(
+        Path("configs/tongue_qlora.toml")
+        .read_text(encoding="utf-8")
+        .replace("save_steps = 100", "save_steps = 0"),
+        encoding="utf-8",
+    )
+
+    try:
+        load_tongue_qlora_config(config_path)
+    except ValueError as error:
+        assert "training.save_steps must be positive" in str(error)
+    else:
+        raise AssertionError("Expected non-positive save_steps to be rejected")
+
+
+def test_resume_from_checkpoint_can_find_and_validate_the_latest_checkpoint(tmp_path: Path):
+    older_checkpoint = tmp_path / "checkpoint-100"
+    latest_checkpoint = tmp_path / "checkpoint-200"
+    older_checkpoint.mkdir()
+    latest_checkpoint.mkdir()
+    for checkpoint in (older_checkpoint, latest_checkpoint):
+        for filename in (
+            "trainer_state.json",
+            "optimizer.pt",
+            "scheduler.pt",
+            "adapter_config.json",
+            "adapter_model.safetensors",
+        ):
+            (checkpoint / filename).write_text("{}", encoding="utf-8")
+
+    assert resolve_resume_checkpoint("latest", tmp_path) == str(latest_checkpoint)
+    assert resolve_resume_checkpoint(str(older_checkpoint), tmp_path) == str(older_checkpoint)
+
+
+def test_resume_from_checkpoint_rejects_a_weight_only_directory(tmp_path: Path):
+    checkpoint = tmp_path / "checkpoint-100"
+    checkpoint.mkdir()
+
+    try:
+        resolve_resume_checkpoint(str(checkpoint), tmp_path)
+    except SystemExit as error:
+        assert "required files" in str(error)
+    else:
+        raise AssertionError("Expected a weight-only directory to be rejected")
 
 
 def test_tongue_split_is_disjoint_at_source_group_level():

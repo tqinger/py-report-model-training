@@ -1,6 +1,5 @@
-# QLoRA hyperparameters for the 76,320 cleaned tongue-analysis conversations
-# in data/conversations. A 1024-token context window comfortably covers the
-# system, user, and assistant messages without creating unnecessary padding.
+# QLoRA hyperparameters for the supplied 1,980/20 five-state wellness SFT split.
+# A 2,048-token context retains the sampled Qwen3 chat-template records (maximum 1,510 tokens).
 
 [quantization]
 load_in_4bit = true
@@ -24,24 +23,23 @@ target_modules = [
 ]
 
 [training]
-seed = 20260731
-max_length = 1024
-num_train_epochs = 1.0
+seed = 20260817
+max_length = 2048
+num_train_epochs = 5.0
 learning_rate = 2e-5
-lr_scheduler_type = "linear"
-per_device_train_batch_size = 2
-per_device_eval_batch_size = 2
-gradient_accumulation_steps = 4
-warmup_ratio = 0.03
+lr_scheduler_type = "cosine_with_min_lr"
+lr_scheduler_kwargs = { min_lr_rate = 0.2 }
+per_device_train_batch_size = 4
+per_device_eval_batch_size = 4
+gradient_accumulation_steps = 2
+warmup_ratio = 0.05
 max_grad_norm = 1.0
-optim = "paged_adamw_8bit"
+optim = "adamw_torch"
 eval_strategy = "steps"
 save_strategy = "steps"
 logging_strategy = "steps"
-logging_steps = 50
-# Save a complete, resumable Trainer checkpoint every 500 optimizer steps.
-# The newest recovery checkpoint replaces the previous one; a distinct best model is retained.
-save_steps = 500
+logging_steps = 25
+save_steps = 50
 save_total_limit = 1
 load_best_model_at_end = true
 metric_for_best_model = "eval_loss"

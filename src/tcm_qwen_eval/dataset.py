@@ -121,6 +121,73 @@ def _normalized_messages(path: Path) -> list[dict[str, str]]:
     return normalized
 
 
+def _normalized_jsonl_messages(path: Path):
+    """Yield validated Chat SFT messages from a UTF-8 JSONL file."""
+    with path.open(encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                raise ValueError(f"{path}:{line_number}: blank lines are not valid SFT records")
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise ValueError(f"{path}:{line_number}: invalid JSON") from error
+            messages = record.get("messages") if isinstance(record, dict) else None
+            if (
+                not isinstance(messages, list)
+                or len(messages) != len(EXPECTED_ROLES)
+                or any(not isinstance(item, dict) for item in messages)
+                or tuple(item.get("role") for item in messages) != EXPECTED_ROLES
+            ):
+                raise ValueError(
+                    f"{path}:{line_number}: expected system/user/assistant messages"
+                )
+            normalized = [
+                {"role": message["role"], "content": str(message.get("content", "")).strip()}
+                for message in messages
+            ]
+            if any(not message["content"] for message in normalized):
+                raise ValueError(f"{path}:{line_number}: empty message content")
+            yield line_number, normalized
+
+
+def load_jsonl_sft_splits(
+    data_dir: Path,
+    *,
+    domain: str,
+    task: str,
+) -> dict[str, list[Example]]:
+    """Load a supplied train/validation Chat SFT split without re-splitting it.
+
+    The generated datasets in this project already provide ``train.jsonl`` and
+    ``val.jsonl``.  Preserving that split makes training reproducible and avoids
+    moving records out of the supplied validation set.
+    """
+    split_paths = {
+        "train": data_dir / "train.jsonl",
+        "validation": data_dir / "val.jsonl",
+    }
+    result: dict[str, list[Example]] = {}
+    for split_name, path in split_paths.items():
+        if not path.is_file():
+            raise ValueError(f"{data_dir}: missing required {path.name}")
+        examples: list[Example] = []
+        for line_number, messages in _normalized_jsonl_messages(path):
+            user = messages[1]["content"]
+            examples.append(
+                Example(
+                    id=f"{data_dir.name}/{split_name}/{line_number:06d}",
+                    domain=domain,
+                    task=task,
+                    group_id=f"{domain}-{_hash(user)[:16]}",
+                    messages=messages,
+                )
+            )
+        if not examples:
+            raise ValueError(f"{path}: contains no SFT records")
+        result[split_name] = examples
+    return result
+
+
 def _load_conversation_examples(data_dir: Path) -> list[Example]:
     """Load the flat, exhaustive tongue-combination conversation dataset."""
     examples: list[Example] = []
@@ -175,6 +242,15 @@ def load_examples(data_dir: Path) -> list[Example]:
             for domain_dir in sorted(path for path in data_dir.iterdir() if path.is_dir()):
                 # Conversations are an alternative data root, not part of the legacy multi-domain set.
                 if domain_dir.name == CONVERSATIONS_DIRECTORY:
+                    continue
+                # Data roots can also contain smoke fixtures and separate task directories.
+                # Only the four established legacy domains participate in this combined loader.
+                if domain_dir.name not in SUPPORTED_DOMAINS:
+                    continue
+                # Generated JSONL datasets are loaded by ``load_jsonl_sft_splits`` so their
+                # supplied train/validation split remains intact.  Do not mistake summary.json
+                # for a legacy single-record training example when scanning the old data root.
+                if (domain_dir / "train.jsonl").is_file() or (domain_dir / "val.jsonl").is_file():
                     continue
                 examples.extend(
                     _load_domain_examples(domain_dir.name, sorted(domain_dir.glob("*.json")))

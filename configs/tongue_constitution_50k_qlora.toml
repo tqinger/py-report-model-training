@@ -1,6 +1,5 @@
-# QLoRA hyperparameters for Qwen/Qwen3-1.7B on the 76,320 cleaned conversations.
-# Batch size 4 with accumulation 2 keeps the effective batch size at 8, matching
-# the established 4B recipe while taking advantage of the smaller 4-bit base model.
+# QLoRA hyperparameters for the supplied 99,000/1,000 tongue-constitution SFT split.
+# A 512-token context covers the sampled Qwen3 chat-template inputs (maximum 426 tokens).
 
 [quantization]
 load_in_4bit = true
@@ -24,25 +23,22 @@ target_modules = [
 ]
 
 [training]
-seed = 20260803
-max_length = 1024
+seed = 20260817
+max_length = 512
 num_train_epochs = 1.0
-learning_rate = 3e-5
-# During the scheduled training steps, decay on a half-cosine to a 6e-6 floor.
+learning_rate = 2e-5
 lr_scheduler_type = "cosine_with_min_lr"
 lr_scheduler_kwargs = { min_lr_rate = 0.2 }
-per_device_train_batch_size = 8
-per_device_eval_batch_size = 8
-gradient_accumulation_steps = 1
+per_device_train_batch_size = 4
+per_device_eval_batch_size = 4
+gradient_accumulation_steps = 2
 warmup_ratio = 0.03
 max_grad_norm = 1.0
-optim = "paged_adamw_8bit"
+optim = "adamw_torch"
 eval_strategy = "steps"
 save_strategy = "steps"
 logging_strategy = "steps"
 logging_steps = 50
-# Save a complete, resumable Trainer checkpoint every 500 optimizer steps.
-# The newest recovery checkpoint replaces the previous one; a distinct best model is retained.
 save_steps = 500
 save_total_limit = 1
 load_best_model_at_end = true

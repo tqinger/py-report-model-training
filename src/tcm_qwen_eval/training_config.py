@@ -74,6 +74,7 @@ class TrainingHyperparameters:
     save_strategy: str
     logging_strategy: str
     logging_steps: int
+    save_steps: int
     save_total_limit: int
     load_best_model_at_end: bool
     metric_for_best_model: str
@@ -105,6 +106,8 @@ class TrainingHyperparameters:
             raise ValueError("training.max_grad_norm must be positive")
         if self.logging_strategy == "steps" and self.logging_steps <= 0:
             raise ValueError("training.logging_steps must be positive when logging_strategy is 'steps'")
+        if self.save_steps <= 0:
+            raise ValueError("training.save_steps must be positive")
         if self.save_total_limit <= 0:
             raise ValueError("training.save_total_limit must be positive")
         if not self.lr_scheduler_type:

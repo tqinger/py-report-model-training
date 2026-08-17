@@ -193,9 +193,63 @@ echo "Log: artifacts/logs/tongue_qlora_${timestamp}.out.log"
 ```
 
 PYTHONPATH=src uv run python -u scripts/train_tongue_qlora.py \
-  --config configs/tongue_qlora_conversations.toml \
-  --data-dir data/conversations \
-  --output-dir artifacts/qwen3-4b-tongue-conversations-qlora
+    --config configs/tongue_qlora_conversations.toml \
+    --data-dir data/conversations \
+    --output-dir artifacts/qwen3-4b-tongue-conversations-qlora
+
+### 舌象体质 50K
+
+数据源：`data/tongue_constitution_50k`。该数据集已固定划分 `train.jsonl` 和 `val.jsonl`，训练入口会原样使用，不再重新切分。
+
+```bash
+timestamp=$(date +%Y%m%d-%H%M%S)
+mkdir -p artifacts/logs
+PYTHONPATH=src nohup uv run python -u scripts/train_tongue_constitution_qlora.py \
+  --config configs/tongue_constitution_50k_qlora.toml \
+  --data-dir data/tongue_constitution_50k \
+  --output-dir artifacts/qwen3-4b-tongue-constitution-50k-qlora \
+  >"artifacts/logs/tongue_constitution_50k_qlora_${timestamp}.out.log" \
+  2>"artifacts/logs/tongue_constitution_50k_qlora_${timestamp}.err.log" \
+  </dev/null &
+echo "PID: $!"
+echo "Log: artifacts/logs/tongue_constitution_50k_qlora_${timestamp}.out.log"
+```
+
+### 五态 20
+
+数据源：`data/wutai_20`。该数据集已固定划分 `train.jsonl` 和 `val.jsonl`，训练入口会原样使用，不再重新切分。
+
+```bash
+timestamp=$(date +%Y%m%d-%H%M%S)
+mkdir -p artifacts/logs
+PYTHONPATH=src nohup uv run python -u scripts/train_wutai_qlora.py \
+  --config configs/wutai_20_qlora.toml \
+  --data-dir data/wutai_20 \
+  --output-dir artifacts/qwen3-4b-wutai-20-qlora \
+  >"artifacts/logs/wutai_20_qlora_${timestamp}.out.log" \
+  2>"artifacts/logs/wutai_20_qlora_${timestamp}.err.log" \
+  </dev/null &
+echo "PID: $!"
+echo "Log: artifacts/logs/wutai_20_qlora_${timestamp}.out.log"
+```
+
+### 全诊报告 50K
+
+数据源：`data/holistic_50k`。该数据集已固定划分 `train.jsonl` 和 `val.jsonl`，训练入口会原样使用，不再重新切分。
+
+```bash
+timestamp=$(date +%Y%m%d-%H%M%S)
+mkdir -p artifacts/logs
+PYTHONPATH=src nohup uv run python -u scripts/train_holistic_qlora.py \
+  --config configs/holistic_50k_qlora.toml \
+  --data-dir data/holistic_50k \
+  --output-dir artifacts/qwen3-4b-holistic-50k-qlora \
+  >"artifacts/logs/holistic_50k_qlora_${timestamp}.out.log" \
+  2>"artifacts/logs/holistic_50k_qlora_${timestamp}.err.log" \
+  </dev/null &
+echo "PID: $!"
+echo "Log: artifacts/logs/holistic_50k_qlora_${timestamp}.out.log"
+```
 
 
 ### 冒烟测试数据
@@ -235,4 +289,17 @@ tail -f artifacts/logs/tongue_qlora_<timestamp>.out.log
   -DataDir data/conversations `
   -OutputDir artifacts/qwen3-4b-tongue-conversations-qlora `
   -ResumeFromCheckpoint artifacts/qwen3-4b-tongue-conversations-qlora/checkpoint-<step>
+```
+
+`training.save_steps` 控制完整、可恢复 checkpoint 的保存间隔（优化器 step）。
+`save_total_limit = 1` 会在保存新 checkpoint 时自动删除上一个；若最佳验证 checkpoint
+不同，Trainer 会额外保留它。不需要填写 step 编号时，使用 `-ResumeLatest` 自动从最新
+保留的 checkpoint 恢复：
+
+```powershell
+.\scripts\start_tongue_qlora_training.ps1 `
+  -Config configs/tongue_qlora_conversations.toml `
+  -DataDir data/conversations `
+  -OutputDir artifacts/qwen3-4b-tongue-conversations-qlora `
+  -ResumeLatest
 ```

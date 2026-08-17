@@ -1,6 +1,6 @@
-# Qwen3-4B 舌象 LoRA 的 vLLM 部署手册
+# Qwen3-4B 舌象与体质 LoRA 的 vLLM 部署手册
 
-本手册说明如何将本项目训练得到的 Qwen3-4B LoRA Adapter 用 vLLM 部署为 OpenAI 兼容 API，并覆盖：本机验证、systemd 运维、切换新权重、迁移到阿里云 ECS、停止服务和排障。
+本手册说明如何将本项目训练得到的 Qwen3-4B 舌象和体质 LoRA Adapter 用**一个** vLLM 实例部署为 OpenAI 兼容 API，并覆盖：本机验证、FP8 基座转换、systemd 运维、切换新权重、迁移到阿里云 ECS、停止服务和排障。
 
 > 当前已验证环境：Ubuntu 24.04、NVIDIA GeForce RTX 5090 D（32 GiB）、NVIDIA 驱动 595.84、Python 3.12、vLLM 0.26.0。实际部署使用了 `--enforce-eager`，以绕过该组合下图编译初始化时出现的 CUDA 段错误。
 
@@ -16,18 +16,28 @@ Qwen3-4B 基座快照
 /home/tan/py-report-model-training/artifacts/hf_cache/
   models--Qwen--Qwen3-4B/snapshots/1cfa9a7208912126459214e8b04321603b3df60c
 
-LoRA Adapter
+舌象 LoRA Adapter（rank 16）
 /home/tan/py-report-model-training/artifacts/
   qwen3-4b-tongue-conversations-qlora/checkpoint-10176
+
+体质 LoRA Adapter（rank 16）
+/home/tan/py-report-model-training/artifacts/
+  qwen3-4b-constitution-qlora/checkpoint-2324
 ```
 
-Adapter 的 `adapter_config.json` 可能保留了训练机器上的 Windows 相对路径；部署时不要依赖该字段。始终将基座路径作为 `vllm serve` 的第一个参数，并通过 `--lora-modules` 显式提供 Adapter 路径。
+两个 Adapter 均基于同一份 Qwen3-4B 基座、使用 rank 16。Adapter 的 `adapter_config.json` 可能保留了训练机器上的 Windows 相对路径；部署时不要依赖该字段。始终将基座路径作为 `vllm serve` 的第一个参数，并通过 `--lora-modules` 显式提供 Adapter 路径。
 
-本手册把 API 中的 Adapter 名称固定为 `tongue-qlora`，客户端请求时应传入：
+本手册把 API 中的 Adapter 名称固定为 `tongue-qlora` 和 `constitution-qlora`。每次请求只选择其中一个 Adapter：
 
 ```json
 {"model": "tongue-qlora"}
 ```
+
+```json
+{"model": "constitution-qlora"}
+```
+
+`--max-loras 2` 允许引擎在同一批次中调度这两个不同 Adapter；它不表示单个请求会同时叠加两个 Adapter。
 
 ## 2. 当前服务器：安装并启动服务
 
@@ -38,7 +48,7 @@ nvidia-smi
 df -h
 ```
 
-确认 GPU 可见、磁盘有足够空间，并确认基座目录、Adapter 目录内分别有模型权重和 `adapter_config.json`。当前服务按约 3,000 次/天的低并发场景配置为 `max_model_len=4096`、`gpu_memory_utilization=0.75`、`max_num_seqs=4`；显存较小或峰值并发较高时应重新压测。
+确认 GPU 可见、磁盘有足够空间，并确认基座目录、两个 Adapter 目录内分别有模型权重和 `adapter_config.json`。当前服务按约 3,000 次/天的低并发场景配置为 `max_model_len=4096`、`gpu_memory_utilization=0.75`、`max_num_seqs=4`；显存较小或峰值并发较高时应重新压测。
 
 ### 2.2 创建独立 vLLM 环境
 
@@ -61,7 +71,34 @@ $HOME/.venvs/vllm-qwen3/bin/vllm --version
 
 `--torch-backend=auto` 会根据机器上的 NVIDIA 驱动选择合适的 PyTorch/CUDA 后端。不要复制其他机器的 `site-packages` 目录；应在目标 GPU 机器上重新安装。
 
-### 2.3 先在前台验证（可选）
+### 2.3 生成可部署的 FP8 共享基座（可选）
+
+FP8 部署仍保留两个 LoRA Adapter。转换对象是共同的完整 Qwen3-4B 基座，**不是** `checkpoint-2324` 或 `checkpoint-10176`；若将 Adapter 合并为完整模型，就无法在同一个服务中按请求切换两项能力。
+
+在部署机新建与 vLLM 环境分离的 llm-compressor 环境。vLLM 官方建议将两者分开安装：
+
+```bash
+$HOME/.local/bin/uv venv --python 3.12 --seed $HOME/.venvs/llm-compressor
+$HOME/.local/bin/uv pip install \
+  --python $HOME/.venvs/llm-compressor/bin/python \
+  llmcompressor
+
+# <项目根目录> 内的脚本；输出目录必须为新建或空目录。
+BASE_BF16=/home/tan/py-report-model-training/artifacts/hf_cache/models--Qwen--Qwen3-4B/snapshots/1cfa9a7208912126459214e8b04321603b3df60c
+FP8_BASE=/home/tan/models/releases/qwen3-4b-fp8-20260812
+
+$HOME/.venvs/llm-compressor/bin/python \
+  /home/tan/py-report-model-training/scripts/convert_qwen3_4b_base_to_fp8.py \
+  --model "$BASE_BF16" \
+  --output-dir "$FP8_BASE" \
+  --device cuda:0
+```
+
+脚本使用无需校准数据的 `FP8_DYNAMIC` 量化：Linear 层权重为 FP8，激活在运行时按 token 动态量化；`lm_head` 保留原精度。它会校验输入是完整 Hugging Face 基座、拒绝 LoRA Adapter 目录，并在完成后检查输出的权重和量化元数据。请保留脚本最终输出的 `fp8_model_dir` 与 `quantization_config` 记录。
+
+FP8 W8A8 需要 Ada Lovelace（计算能力 8.9）或 Hopper 及更新架构才能获得硬件加速；在不支持的 GPU 上不要将此流程作为生产部署方案。转换完成后使用下文的双 Adapter 冒烟请求验收，再切换生产服务。
+
+### 2.4 先在前台验证（可选）
 
 在创建 systemd 服务前，可用下面的命令前台启动。确认成功后按 `Ctrl+C` 停止，再继续下一节。
 
@@ -72,8 +109,20 @@ $HOME/.venvs/vllm-qwen3/bin/vllm serve \
   /home/tan/py-report-model-training/artifacts/hf_cache/models--Qwen--Qwen3-4B/snapshots/1cfa9a7208912126459214e8b04321603b3df60c \
   --host 127.0.0.1 --port 8000 \
   --enable-lora \
-  --lora-modules tongue-qlora=/home/tan/py-report-model-training/artifacts/qwen3-4b-tongue-conversations-qlora/checkpoint-10176 \
-  --max-lora-rank 16 --max-loras 1 \
+  --lora-modules tongue-qlora=/home/tan/py-report-model-training/artifacts/qwen3-4b-tongue-conversations-qlora/checkpoint-10176 constitution-qlora=/home/tan/py-report-model-training/artifacts/qwen3-4b-constitution-qlora/checkpoint-2324 \
+  --max-lora-rank 16 --max-loras 2 \
+  --gpu-memory-utilization 0.75 --max-model-len 4096 --max-num-seqs 4 \
+  --no-enable-prefix-caching --enforce-eager
+```
+
+上面的命令使用 BF16 基座。如已完成 FP8 转换，只替换 `vllm serve` 后的第一个路径为 `$FP8_BASE`，其余两个 `--lora-modules` 和服务参数保持不变：
+
+```bash
+$HOME/.venvs/vllm-qwen3/bin/vllm serve "$FP8_BASE" \
+  --host 127.0.0.1 --port 8000 \
+  --enable-lora \
+  --lora-modules tongue-qlora=/home/tan/py-report-model-training/artifacts/qwen3-4b-tongue-conversations-qlora/checkpoint-10176 constitution-qlora=/home/tan/py-report-model-training/artifacts/qwen3-4b-constitution-qlora/checkpoint-2324 \
+  --max-lora-rank 16 --max-loras 2 \
   --gpu-memory-utilization 0.75 --max-model-len 4096 --max-num-seqs 4 \
   --no-enable-prefix-caching --enforce-eager
 ```
@@ -87,6 +136,8 @@ $HOME/.venvs/vllm-qwen3/bin/vllm serve \
 | `--gpu-memory-utilization` | `0.75` | 允许 vLLM 最多规划使用约 75% 的可用 GPU 显存，主要用于模型后的 KV Cache。当前低并发场景无需预留 90%；峰值并发增加前应通过压测再提高。 |
 | `--max-model-len` | `4096` | 单次请求允许的最大上下文长度（输入 token 与输出 token 合计上限）。值越大，单请求可处理的内容越长，但 KV Cache 占用越多；需要长病历或长输出时再升回 `8192`。 |
 | `--max-num-seqs` | `4` | 调度器一次最多并行处理的序列数量。适合约 3,000 次/天的低并发场景；请求超过此数量会排队，不代表每天只能处理 4 次。 |
+| `--max-loras` | `2` | 启动时预留两个 LoRA 的调度容量，以允许 `tongue-qlora` 与 `constitution-qlora` 同批请求。单条请求仍只选择一个 `model`。 |
+| `--max-lora-rank` | `16` | 两个当前 Adapter 的实际 rank。应设为将加载 Adapter 中的最大值，设得更大会浪费内存。 |
 | `--no-enable-prefix-caching` | 已启用 | 关闭跨请求的 Prefix Cache 复用。每个正在生成的请求仍必须使用临时 KV Cache；该参数不会关闭请求内 KV Cache。 |
 | `--enforce-eager` | 已启用 | 禁用 torch.compile 和 CUDA Graph，改为即时执行。当前用于规避 RTX 5090 D + vLLM 0.26.0 的图编译初始化段错误；它会牺牲部分性能，但不影响模型语义和 LoRA 效果。 |
 
@@ -97,13 +148,13 @@ sudo systemctl daemon-reload
 sudo systemctl restart tongue-vllm.service
 ```
 
-### 2.4 创建 systemd 服务
+### 2.5 创建 systemd 服务
 
 保存以下文件为 `/home/tan/tongue-vllm.service`，并按实际路径替换模型与 Adapter 目录：
 
 ```ini
 [Unit]
-Description=Qwen3-4B Tongue LoRA vLLM API
+Description=Qwen3-4B Tongue and Constitution LoRA vLLM API
 After=network-online.target
 Wants=network-online.target
 
@@ -117,7 +168,7 @@ Environment=HF_HOME=/home/tan/py-report-model-training/artifacts/hf_cache
 Environment=HF_HUB_OFFLINE=1
 Environment=TRANSFORMERS_OFFLINE=1
 Environment=CUDA_VISIBLE_DEVICES=0
-ExecStart=/home/tan/.venvs/vllm-qwen3/bin/vllm serve /home/tan/py-report-model-training/artifacts/hf_cache/models--Qwen--Qwen3-4B/snapshots/1cfa9a7208912126459214e8b04321603b3df60c --host 127.0.0.1 --port 8000 --enable-lora --lora-modules tongue-qlora=/home/tan/py-report-model-training/artifacts/qwen3-4b-tongue-conversations-qlora/checkpoint-10176 --max-lora-rank 16 --max-loras 1 --gpu-memory-utilization 0.75 --max-model-len 4096 --max-num-seqs 4 --no-enable-prefix-caching --enforce-eager
+ExecStart=/home/tan/.venvs/vllm-qwen3/bin/vllm serve /home/tan/models/base-current --host 127.0.0.1 --port 8000 --enable-lora --lora-modules tongue-qlora=/home/tan/models/tongue-qlora-current constitution-qlora=/home/tan/models/constitution-qlora-current --max-lora-rank 16 --max-loras 2 --gpu-memory-utilization 0.75 --max-model-len 4096 --max-num-seqs 4 --no-enable-prefix-caching --enforce-eager
 Restart=on-failure
 RestartSec=10
 TimeoutStartSec=0
@@ -127,7 +178,18 @@ LimitNOFILE=65535
 WantedBy=multi-user.target
 ```
 
-其中 `PATH` 不能省略：vLLM 的 FlashInfer 运行时需要调用虚拟环境中的 `ninja`。然后安装、启用并查看状态：
+其中 `PATH` 不能省略：vLLM 的 FlashInfer 运行时需要调用虚拟环境中的 `ninja`。首次启用前创建服务使用的稳定链接；FP8 部署将 `base-current` 指向上一节的 `$FP8_BASE`。若部署 BF16，请将该变量改为第 1 节所列的原始基座快照：
+
+```bash
+mkdir -p /home/tan/models
+ln -sfn "$FP8_BASE" /home/tan/models/base-current
+ln -sfn /home/tan/py-report-model-training/artifacts/qwen3-4b-tongue-conversations-qlora/checkpoint-10176 \
+  /home/tan/models/tongue-qlora-current
+ln -sfn /home/tan/py-report-model-training/artifacts/qwen3-4b-constitution-qlora/checkpoint-2324 \
+  /home/tan/models/constitution-qlora-current
+```
+
+然后安装、启用并查看状态：
 
 ```bash
 sudo install -o root -g root -m 644 \
@@ -137,7 +199,7 @@ sudo systemctl enable --now tongue-vllm.service
 sudo systemctl status tongue-vllm.service --no-pager
 ```
 
-### 2.5 验收 API
+### 2.6 验收 API
 
 服务只绑定 `127.0.0.1`，因此以下命令必须在服务器上执行：
 
@@ -165,9 +227,27 @@ curl -s http://127.0.0.1:8000/v1/chat/completions \
   }'
 ```
 
-`/v1/models` 应包含 `tongue-qlora`。本项目的评测推理禁用了 Qwen3 thinking，在线调用也建议传入 `chat_template_kwargs.enable_thinking=false`，以保持行为一致。
+`/v1/models` 应同时包含 `tongue-qlora` 和 `constitution-qlora`。接着执行体质报告冒烟请求：
 
-### 2.6 每次请求的推理参数
+```bash
+curl -s http://127.0.0.1:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "constitution-qlora",
+    "messages": [
+      {"role": "system", "content": "你是中医体质调理顾问。表达通俗、专业、温和；不作疾病诊断。"},
+      {"role": "user", "content": "根据以下体质辨识信息生成 JSON，只输出 JSON：\n{\n  \"analysis_summary\": \"一句综合概括\",\n  \"analysis_symptoms\": \"体质表现段落\",\n  \"analysis_advice\": \"调理方向段落\"\n}\n\n要求：仅使用输入列出的体质，三个字段均不可为空。\n\n体质辨识信息：\n结论：您的主要体质为气虚质，存在阴虚质、痰湿质倾向\n主体质（main_type）：QIXU（气虚质）\n兼挟体质：无\n倾向体质：阴虚质、痰湿质"}
+    ],
+    "temperature": 0.2,
+    "top_p": 0.9,
+    "max_tokens": 384,
+    "chat_template_kwargs": {"enable_thinking": false}
+  }'
+```
+
+FP8 部署验收标准是：`/v1/models` 同时返回两个 Adapter，舌象和体质两条冒烟请求均返回非空回复，且体质请求可以解析为包含三个非空字段的 JSON。本项目的评测推理禁用了 Qwen3 thinking，在线调用也建议传入 `chat_template_kwargs.enable_thinking=false`，以保持行为一致。
+
+### 2.7 每次请求的推理参数
 
 以下 JSON 是调用方在每次 `POST /v1/chat/completions` 中传入的参数示例。它们只影响当前请求，修改时不需要重启服务：
 
@@ -234,9 +314,9 @@ nvidia-smi
 
 不要使用 `kill -9` 作为常规停止方式；优先使用 `systemctl stop`，它能正确结束 API Server 和 EngineCore 子进程。仅在进程卡死且 `systemctl stop` 超时后再排查 PID 和强制终止。
 
-## 4. 安全切换模型版本（LoRA 或完整模型）
+## 4. 安全切换模型版本（两个 LoRA 或 FP8 基座）
 
-vLLM 只会在服务启动时加载 LoRA。因此切换权重一定需要重启服务。切换前先确认新 Adapter 与当前 Qwen3-4B 基座匹配，并至少检查：
+vLLM 只会在服务启动时加载 LoRA。因此切换任一 Adapter 或基座一定需要重启服务。切换前先确认新 Adapter 与当前 Qwen3-4B 基座匹配，并至少检查：
 
 ```bash
 NEW_ADAPTER=/home/tan/py-report-model-training/artifacts/qwen3-4b-tongue-conversations-qlora/checkpoint-<新步数>
@@ -245,29 +325,33 @@ test -f "$NEW_ADAPTER/adapter_model.safetensors" -o -f "$NEW_ADAPTER/adapter_mod
 cat "$NEW_ADAPTER/adapter_config.json"
 ```
 
-### 4.1 推荐：稳定路径 + 符号链接
+### 4.1 推荐：三个稳定路径 + 符号链接
 
-首次改造时，让 systemd 的 `--lora-modules` 指向稳定路径：
+systemd 应始终使用一个基座路径和两个 Adapter 稳定路径：
 
 ```text
---lora-modules tongue-qlora=/home/tan/models/tongue-qlora-current
+vllm serve /home/tan/models/base-current ...
+--lora-modules tongue-qlora=/home/tan/models/tongue-qlora-current constitution-qlora=/home/tan/models/constitution-qlora-current
 ```
 
-创建当前版本链接并修改一次服务文件：
+首次创建当前版本链接并修改一次服务文件：
 
 ```bash
 mkdir -p /home/tan/models
 ln -sfn \
   /home/tan/py-report-model-training/artifacts/qwen3-4b-tongue-conversations-qlora/checkpoint-10176 \
   /home/tan/models/tongue-qlora-current
+ln -sfn \
+  /home/tan/py-report-model-training/artifacts/qwen3-4b-constitution-qlora/checkpoint-2324 \
+  /home/tan/models/constitution-qlora-current
 
 sudoedit /etc/systemd/system/tongue-vllm.service
-# 只将 --lora-modules 后的路径替换为 /home/tan/models/tongue-qlora-current
+# 替换基座与两个 --lora-modules 路径为上述稳定链接。
 sudo systemctl daemon-reload
 sudo systemctl restart tongue-vllm.service
 ```
 
-之后切换新权重时，记录旧路径、原子替换链接、重启并验收：
+之后切换舌象 Adapter 时，记录旧路径、原子替换链接、重启并完成第 2.6 节的两个 API 验收：
 
 ```bash
 OLD_ADAPTER=$(readlink -f /home/tan/models/tongue-qlora-current)
@@ -287,76 +371,50 @@ mv -Tf /home/tan/models/tongue-qlora-next /home/tan/models/tongue-qlora-current
 sudo systemctl restart tongue-vllm.service
 ```
 
-### 4.2 切换整个模型（基座 + Adapter，或合并后的完整模型）
-
-“整个模型”有两种情况，启动参数不能混用：
-
-| 新产物类型 | `vllm serve` 的第一个参数 | LoRA 参数 |
-| --- | --- | --- |
-| 新基座 + 独立 LoRA Adapter | 新基座目录 | 保留 `--enable-lora --lora-modules <名称>=<Adapter目录>` |
-| 已合并的完整微调模型 | 合并后模型目录 | **删除** `--enable-lora` 与 `--lora-modules` |
-
-只有当 Adapter 是以该基座、相同架构和 tokenizer 训练时，才可以组合使用。不要将 Qwen3-4B Adapter 挂载到不同参数规模、不同架构或不同 tokenizer 的基座上。
-
-#### 推荐：为基座和 Adapter 都使用稳定路径
-
-先将 service 的模型和 Adapter 路径一次性改为稳定链接；之后每次完整模型切换无需编辑长的 `ExecStart`：
-
-```text
-vllm serve /home/tan/models/base-current ...
---lora-modules tongue-qlora=/home/tan/models/tongue-qlora-current
-```
-
-准备新版本前，先在不停现有服务的情况下校验文件和兼容性：
+切换体质 Adapter 时使用同样的流程，只替换对应的变量与稳定链接：
 
 ```bash
-NEW_BASE=/home/tan/models/releases/qwen3-4b-<版本>/base
-NEW_ADAPTER=/home/tan/models/releases/qwen3-4b-<版本>/adapter
-
-test -f "$NEW_BASE/config.json"
-test -f "$NEW_BASE/tokenizer_config.json"
+OLD_ADAPTER=$(readlink -f /home/tan/models/constitution-qlora-current)
+NEW_ADAPTER=/home/tan/py-report-model-training/artifacts/qwen3-4b-constitution-qlora/checkpoint-<新步数>
 test -f "$NEW_ADAPTER/adapter_config.json"
 test -f "$NEW_ADAPTER/adapter_model.safetensors" -o -f "$NEW_ADAPTER/adapter_model.bin"
-cat "$NEW_ADAPTER/adapter_config.json"
+ln -s "$NEW_ADAPTER" /home/tan/models/constitution-qlora-next
+mv -Tf /home/tan/models/constitution-qlora-next /home/tan/models/constitution-qlora-current
+sudo systemctl restart tongue-vllm.service
 ```
 
-记录旧版本后原子更新两个链接并重启。vLLM 在重启完成前不可提供推理，因此应先在测试机或备用端口完成模型加载验证：
+如需回滚，使用已记录的 `OLD_ADAPTER` 替换 `constitution-qlora-current` 并重启。
+
+### 4.2 切换 BF16/FP8 共享基座
+
+两个 LoRA 只能加载到与训练时相同的 Qwen3-4B 架构和 tokenizer 上。FP8 产物是同一基座的量化版本，因而保留两个 LoRA 参数；不要将某个 Adapter 合并成专用整模，否则不能在此服务中同时路由舌象和体质请求。
+
+在不停现有服务的情况下，先检查新 FP8 基座产物：
 
 ```bash
 OLD_BASE=$(readlink -f /home/tan/models/base-current)
-OLD_ADAPTER=$(readlink -f /home/tan/models/tongue-qlora-current)
+NEW_BASE=/home/tan/models/releases/qwen3-4b-fp8-<版本>
+
+test -f "$NEW_BASE/config.json"
+test -f "$NEW_BASE/tokenizer_config.json"
+test -n "$(find "$NEW_BASE" -maxdepth 1 -name '*.safetensors' -print -quit)"
+# 应输出量化元数据；若为空，不要切换。
+grep -n 'quantization_config' "$NEW_BASE/config.json"
 
 ln -s "$NEW_BASE" /home/tan/models/base-next
 mv -Tf /home/tan/models/base-next /home/tan/models/base-current
-ln -s "$NEW_ADAPTER" /home/tan/models/tongue-qlora-next
-mv -Tf /home/tan/models/tongue-qlora-next /home/tan/models/tongue-qlora-current
 
 sudo systemctl restart tongue-vllm.service
 curl -fsS http://127.0.0.1:8000/v1/models
 ```
 
-如果新版本失败，恢复两个旧链接并重启即可回滚：
+若服务无法加载或任一第 2.6 节冒烟请求失败，恢复旧基座链接并重启：
 
 ```bash
 ln -s "$OLD_BASE" /home/tan/models/base-next
 mv -Tf /home/tan/models/base-next /home/tan/models/base-current
-ln -s "$OLD_ADAPTER" /home/tan/models/tongue-qlora-next
-mv -Tf /home/tan/models/tongue-qlora-next /home/tan/models/tongue-qlora-current
 sudo systemctl restart tongue-vllm.service
 ```
-
-若新产物是**合并后的完整微调模型**，应先备份 unit，再将 `ExecStart` 改为 `vllm serve <完整模型目录>`，删除所有 LoRA 相关参数，并推荐增加稳定的 API 名称，例如 `--served-model-name tongue-model-v20260803`。随后执行：
-
-```bash
-sudo cp /etc/systemd/system/tongue-vllm.service \
-  /etc/systemd/system/tongue-vllm.service.bak.$(date +%Y%m%d-%H%M%S)
-sudoedit /etc/systemd/system/tongue-vllm.service
-sudo systemctl daemon-reload
-sudo systemctl restart tongue-vllm.service
-sudo systemctl status tongue-vllm.service --no-pager
-```
-
-完整模型切换失败时，将最近的 `.bak.<时间戳>` 复制回 `/etc/systemd/system/tongue-vllm.service`，再执行 `daemon-reload` 和 `restart`。客户端模型名随 `--served-model-name` 变化；发布前应同步更新调用方配置。
 
 ## 5. 迁移到阿里云 ECS
 
@@ -373,26 +431,29 @@ sudo systemctl status tongue-vllm.service --no-pager
 - [GPU ECS 驱动安装指南](https://www.alibabacloud.com/help/en/egs/user-guide/installation-guideline-for-nvidia-drivers)
 - [带预装 NVIDIA 驱动的 Alibaba Cloud Linux 镜像](https://www.alibabacloud.com/help/en/ecs/user-guide/alibaba-cloud-linux-3-with-pre-installed-nvidia-gpu-drivers)
 
-### 5.2 传输权重和 Adapter
+### 5.2 传输 FP8 基座和两个 Adapter
 
 在新 ECS 上建立目标根目录。下面以从当前服务器复制为例，实际将主机名、端口和用户替换为你的值：
 
 ```bash
 DEPLOY_ROOT=/home/<云端用户>/tongue-vllm
-mkdir -p "$DEPLOY_ROOT/artifacts/hf_cache"
+mkdir -p "$DEPLOY_ROOT/models"
 
-# 必须复制整个 models--Qwen--Qwen3-4B 目录，而不是只复制 snapshots。
-# Hugging Face snapshot 通常通过相对符号链接引用同目录下的 blobs。
+# 传输完成的 FP8 基座目录；量化产物必须完整保留 config、tokenizer 与 safetensors。
 rsync -aP -e 'ssh -p 22' \
-  tan@<源服务器>:/home/tan/py-report-model-training/artifacts/hf_cache/models--Qwen--Qwen3-4B \
-  "$DEPLOY_ROOT/artifacts/hf_cache/"
+  tan@<源服务器>:/home/tan/models/releases/qwen3-4b-fp8-20260812 \
+  "$DEPLOY_ROOT/models/"
 
 rsync -aP -e 'ssh -p 22' \
   tan@<源服务器>:/home/tan/py-report-model-training/artifacts/qwen3-4b-tongue-conversations-qlora/checkpoint-10176 \
   "$DEPLOY_ROOT/artifacts/"
+
+rsync -aP -e 'ssh -p 22' \
+  tan@<源服务器>:/home/tan/py-report-model-training/artifacts/qwen3-4b-constitution-qlora/checkpoint-2324 \
+  "$DEPLOY_ROOT/artifacts/"
 ```
 
-若切换整个模型，传输目标应是新基座的完整目录（或完整微调模型目录）和其对应 Adapter；不要只复制 `snapshots` 子目录。也可以通过对象存储或公司制品库传输，但必须对传输后的文件执行 `sha256sum` 或至少在目标机启动 vLLM 验证。不要把权重或 Adapter 上传到公开存储桶。
+也可以通过对象存储或公司制品库传输，但必须对传输后的文件执行 `sha256sum` 或至少在目标机启动 vLLM 并完成两个 API 冒烟请求。不要把基座权重或 Adapter 上传到公开存储桶。
 
 ### 5.3 云端安装与服务
 
@@ -437,9 +498,9 @@ server {
 | `No such file or directory: 'ninja'` | 确认 service 中的 `Environment=PATH=.../.venvs/vllm-qwen3/bin:...` 存在，并确认 `$HOME/.venvs/vllm-qwen3/bin/ninja` 可执行。 |
 | GPU 初始化时出现 `Segfault`、`cuCtxSynchronize` 或引擎启动失败 | 保留 `--enforce-eager`；先以同一 venv 运行最小 PyTorch CUDA 张量测试，再考虑升级/回退 vLLM、PyTorch 或驱动。 |
 | 显存不足或启动时 KV cache 分配失败 | 降低 `--gpu-memory-utilization`、`--max-model-len`、`--max-num-seqs`，并确认没有其他 GPU 任务。 |
-| `/v1/models` 没有 `tongue-qlora` | 检查 `--enable-lora`、`--lora-modules tongue-qlora=<路径>`、Adapter 文件和 `journalctl` 错误。 |
+| `/v1/models` 缺少 `tongue-qlora` 或 `constitution-qlora` | 检查 `--enable-lora`、两个 `--lora-modules <名称>=<路径>`、Adapter 文件和 `journalctl` 错误。 |
 | 外部机器连不上 API | 若服务监听 `127.0.0.1`，这是预期安全行为；请通过 SSH 隧道、反向代理或网关访问，而不是直接暴露 8000。 |
-| 新权重或完整模型效果异常 | 立即按第 4 节恢复旧 Adapter/基座符号链接或备份的 unit 并重启；保留对应评测结果、模型路径和依赖锁定文件。 |
+| 新 Adapter 或 FP8 基座效果异常 | 立即按第 4 节恢复旧 Adapter/基座符号链接并重启；保留对应评测结果、模型路径和依赖锁定文件。 |
 
 ## 7. 版本和变更记录建议
 
@@ -449,4 +510,5 @@ vLLM 官方文档：
 
 - [GPU 安装](https://docs.vllm.ai/en/stable/getting_started/installation/gpu/)
 - [LoRA Adapters](https://docs.vllm.ai/en/stable/features/lora/)
+- [FP8 W8A8 与 llm-compressor](https://docs.vllm.ai/en/latest/features/quantization/llm_compressor/fp8/)
 - [OpenAI 兼容服务器](https://docs.vllm.ai/en/stable/serving/openai_compatible_server/)

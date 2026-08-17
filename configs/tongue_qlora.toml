@@ -33,11 +33,14 @@ gradient_accumulation_steps = 8
 warmup_ratio = 0.05
 max_grad_norm = 1.0
 optim = "paged_adamw_8bit"
-eval_strategy = "epoch"
-save_strategy = "epoch"
+eval_strategy = "steps"
+save_strategy = "steps"
 logging_strategy = "steps"
 logging_steps = 10
-save_total_limit = 2
+# Save a complete, resumable Trainer checkpoint every 100 optimizer steps.
+# The newest recovery checkpoint replaces the previous one; a distinct best model is retained.
+save_steps = 100
+save_total_limit = 1
 load_best_model_at_end = true
 metric_for_best_model = "eval_loss"
 greater_is_better = false

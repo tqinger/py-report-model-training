@@ -1,7 +1,12 @@
 import json
 from pathlib import Path
 
-from tcm_qwen_eval.dataset import grouped_split, load_examples
+from tcm_qwen_eval.dataset import (
+    SUPPORTED_DOMAINS,
+    grouped_split,
+    load_examples,
+    load_jsonl_sft_splits,
+)
 from tcm_qwen_eval.tongue_qlora import (
     split_constitution_examples,
     split_manifest,
@@ -29,8 +34,13 @@ def _write_conversation(path: Path, round_number: int) -> None:
 
 def test_data_loads_and_has_expected_tasks():
     examples = load_examples(Path("data"))
-    assert len(examples) == 18725
-    assert len({example.task for example in examples}) == 9
+    expected_count = sum(
+        len(list((Path("data") / domain).glob("*.json"))) for domain in SUPPORTED_DOMAINS
+    )
+    assert len(examples) == expected_count
+    assert {"constitution_combined_analysis", "tongue_daily_advice", "tongue_integrated_analysis"} <= {
+        example.task for example in examples
+    }
 
 
 def test_grouped_split_is_complete_and_disjoint():
@@ -76,3 +86,34 @@ def test_constitution_directory_loads_and_splits_without_source_leakage():
     assert not (groups["train"] & groups["test"])
     assert not (groups["validation"] & groups["test"])
     assert split_manifest(splits, 20260729)["domain"] == "constitution-analysis"
+
+
+def test_jsonl_sft_loader_preserves_the_supplied_train_validation_split(tmp_path: Path):
+    data_dir = tmp_path / "generated-sft"
+    data_dir.mkdir()
+    train = {
+        "messages": [
+            {"role": "system", "content": "System"},
+            {"role": "user", "content": "Training"},
+            {"role": "assistant", "content": "Answer"},
+        ]
+    }
+    validation = {
+        "messages": [
+            {"role": "system", "content": "System"},
+            {"role": "user", "content": "Validation"},
+            {"role": "assistant", "content": "Answer"},
+        ]
+    }
+    (data_dir / "train.jsonl").write_text(json.dumps(train, ensure_ascii=False) + "\n", encoding="utf-8")
+    (data_dir / "val.jsonl").write_text(json.dumps(validation, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    splits = load_jsonl_sft_splits(
+        data_dir, domain="generated", task="generated_analysis"
+    )
+
+    assert list(splits) == ["train", "validation"]
+    assert [example.user for example in splits["train"]] == ["Training"]
+    assert [example.user for example in splits["validation"]] == ["Validation"]
+    assert splits["train"][0].id.endswith("train/000001")
+    assert splits["validation"][0].task == "generated_analysis"

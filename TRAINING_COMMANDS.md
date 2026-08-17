@@ -281,6 +281,58 @@ Linux Bash 实时查看日志：
 tail -f artifacts/logs/tongue_qlora_<timestamp>.out.log
 ```
 
+### Ubuntu：恢复预切分 JSONL 训练任务
+
+恢复时必须沿用原来的 `--output-dir`；只传入 `--resume-from-checkpoint` 会自动选择其中最新的完整 checkpoint。以下命令分别恢复舌象体质、五态、全诊报告训练：
+
+```bash
+timestamp=$(date +%Y%m%d-%H%M%S)
+mkdir -p artifacts/logs
+PYTHONPATH=src nohup uv run python -u scripts/train_tongue_constitution_qlora.py \
+  --config configs/tongue_constitution_50k_qlora.toml \
+  --data-dir data/tongue_constitution_50k \
+  --output-dir artifacts/qwen3-4b-tongue-constitution-50k-qlora \
+  --resume-from-checkpoint \
+  >"artifacts/logs/tongue_constitution_50k_resume_${timestamp}.out.log" \
+  2>"artifacts/logs/tongue_constitution_50k_resume_${timestamp}.err.log" \
+  </dev/null &
+echo "PID: $!"
+```
+
+```bash
+timestamp=$(date +%Y%m%d-%H%M%S)
+mkdir -p artifacts/logs
+PYTHONPATH=src nohup uv run python -u scripts/train_wutai_qlora.py \
+  --config configs/wutai_20_qlora.toml \
+  --data-dir data/wutai_20 \
+  --output-dir artifacts/qwen3-4b-wutai-20-qlora \
+  --resume-from-checkpoint \
+  >"artifacts/logs/wutai_20_resume_${timestamp}.out.log" \
+  2>"artifacts/logs/wutai_20_resume_${timestamp}.err.log" \
+  </dev/null &
+echo "PID: $!"
+```
+
+```bash
+timestamp=$(date +%Y%m%d-%H%M%S)
+mkdir -p artifacts/logs
+PYTHONPATH=src nohup uv run python -u scripts/train_holistic_qlora.py \
+  --config configs/holistic_50k_qlora.toml \
+  --data-dir data/holistic_50k \
+  --output-dir artifacts/qwen3-4b-holistic-50k-qlora \
+  --resume-from-checkpoint \
+  >"artifacts/logs/holistic_50k_resume_${timestamp}.out.log" \
+  2>"artifacts/logs/holistic_50k_resume_${timestamp}.err.log" \
+  </dev/null &
+echo "PID: $!"
+```
+
+若要恢复指定 checkpoint，将无参数的 `--resume-from-checkpoint` 替换为例如：
+
+```bash
+--resume-from-checkpoint artifacts/qwen3-4b-wutai-20-qlora/checkpoint-500
+```
+
 从 checkpoint 恢复全组合训练：
 
 ```powershell

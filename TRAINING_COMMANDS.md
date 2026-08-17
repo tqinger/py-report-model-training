@@ -355,3 +355,13 @@ echo "PID: $!"
   -OutputDir artifacts/qwen3-4b-tongue-conversations-qlora `
   -ResumeLatest
 ```
+
+## GPU 运行指标日志
+
+每个训练入口会在每个 `training.logging_steps` 记录一次 GPU 遥测，并在训练结束时补记最后一次数据。数据以 JSONL 形式追加保存到输出目录的 `gpu_metrics.jsonl`；恢复训练时会继续追加到同一个文件。每条记录包含时间、全局 step、epoch，以及每张 GPU 的温度、利用率、已用/总显存、功耗/功耗上限、风扇转速和核心/显存频率。
+
+若 `nvidia-smi` 不可用或采集失败，训练不会中断，对应 JSON 行会写入 `error` 字段。Linux 上可实时查看：
+
+```bash
+tail -f artifacts/qwen3-4b-wutai-20-qlora/gpu_metrics.jsonl
+```

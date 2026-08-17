@@ -19,6 +19,7 @@ from transformers import (
 
 from tcm_qwen_eval.checkpoints import LATEST_CHECKPOINT, resolve_resume_checkpoint
 from tcm_qwen_eval.dataset import Example, load_examples
+from tcm_qwen_eval.gpu_metrics import GPUMetricsCallback
 from tcm_qwen_eval.tongue_qlora import (
     CausalDataCollator,
     TokenizedSFTDataset,
@@ -119,6 +120,7 @@ def main(
             "model_source": model_source,
             "hyperparameters": asdict(config),
             "token_lengths": {name: token_length_summary(items) for name, items in records.items()},
+            "gpu_metrics_path": str(args.output_dir / "gpu_metrics.jsonl"),
         },
     )
     print(
@@ -217,6 +219,7 @@ def main(
         eval_dataset=TokenizedSFTDataset(records["validation"]),
         data_collator=CausalDataCollator(tokenizer.pad_token_id),
         processing_class=tokenizer,
+        callbacks=[GPUMetricsCallback(args.output_dir)],
     )
     train_result = trainer.train(resume_from_checkpoint=resume_checkpoint)
     trainer.save_model(str(args.output_dir))

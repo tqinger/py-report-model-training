@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import psutil
 from transformers import TrainerCallback
 
 GPU_QUERY_FIELDS = (
@@ -37,6 +38,14 @@ GPU_METRIC_FIELDS = (
     "sm_clock_mhz",
     "memory_clock_mhz",
 )
+CPU_TEMPERATURE_SENSOR_KEYWORDS = (
+    "coretemp",
+    "cpu",
+    "k10temp",
+    "zenpower",
+    "soc_thermal",
+)
+CPU_TEMPERATURE_LABEL_KEYWORDS = ("ccd", "core", "cpu", "package", "tctl", "tdie")
 
 
 def _numeric_value(value: str) -> int | float | str | None:
@@ -86,12 +95,73 @@ def query_gpu_metrics() -> list[dict[str, Any]]:
     return metrics
 
 
+def _cpu_temperatures_celsius() -> list[dict[str, str | float | None]]:
+    """Return CPU temperatures exposed by the operating system, when available."""
+    sensors_temperatures = getattr(psutil, "sensors_temperatures", None)
+    if sensors_temperatures is None:
+        return []
+
+    try:
+        sensor_groups = sensors_temperatures(fahrenheit=False)
+    except (OSError, NotImplementedError, psutil.Error):
+        return []
+
+    temperatures: list[dict[str, str | float | None]] = []
+    for sensor_name, readings in sensor_groups.items():
+        normalized_sensor_name = sensor_name.lower()
+        for reading in readings:
+            label = reading.label or None
+            normalized_label = (label or "").lower()
+            if not (
+                any(keyword in normalized_sensor_name for keyword in CPU_TEMPERATURE_SENSOR_KEYWORDS)
+                or any(keyword in normalized_label for keyword in CPU_TEMPERATURE_LABEL_KEYWORDS)
+            ):
+                continue
+            temperatures.append(
+                {
+                    "sensor": sensor_name,
+                    "label": label,
+                    "current_c": reading.current,
+                    "high_c": reading.high,
+                    "critical_c": reading.critical,
+                }
+            )
+    return temperatures
+
+
+def query_cpu_metrics(process: psutil.Process | None = None) -> dict[str, Any]:
+    """Return CPU utilization, clock, memory, and available temperature telemetry."""
+    training_process = process or psutil.Process()
+    frequency = psutil.cpu_freq()
+    memory = psutil.virtual_memory()
+    return {
+        "system_utilization_percent": psutil.cpu_percent(interval=None),
+        "process_utilization_percent": training_process.cpu_percent(interval=None),
+        "frequency_current_mhz": frequency.current if frequency else None,
+        "system_memory_utilization_percent": memory.percent,
+        "system_memory_used_mib": round(memory.used / 1024**2, 2),
+        "system_memory_total_mib": round(memory.total / 1024**2, 2),
+        "temperatures_c": _cpu_temperatures_celsius(),
+    }
+
+
 class GPUMetricsCallback(TrainerCallback):
-    """Append one GPU telemetry JSON record for each Trainer logging step."""
+    """Append GPU and CPU telemetry for each Trainer logging step."""
 
     def __init__(self, output_dir: Path) -> None:
         self.path = output_dir / "gpu_metrics.jsonl"
         self._last_logged_step: int | None = None
+        self._process: psutil.Process | None = None
+        try:
+            process = psutil.Process()
+            # psutil calculates CPU utilization between consecutive calls. Prime it at
+            # callback construction so the first logging step is meaningful as well.
+            psutil.cpu_percent(interval=None)
+            process.cpu_percent(interval=None)
+            self._process = process
+        except (OSError, psutil.Error):
+            # CPU telemetry is optional and must not prevent training from starting.
+            pass
 
     def _write_metrics(self, state: Any) -> None:
         step = int(state.global_step)
@@ -103,12 +173,20 @@ class GPUMetricsCallback(TrainerCallback):
             "global_step": step,
             "epoch": state.epoch,
         }
+        errors: list[str] = []
+        try:
+            payload["cpu"] = query_cpu_metrics(self._process)
+        except (OSError, psutil.Error) as error:
+            payload["cpu"] = {}
+            errors.append(f"CPU telemetry: {error}")
         try:
             payload["gpus"] = query_gpu_metrics()
         except (OSError, RuntimeError, subprocess.SubprocessError) as error:
             # Telemetry must never make an otherwise valid training run fail.
             payload["gpus"] = []
-            payload["error"] = str(error)
+            errors.append(str(error))
+        if errors:
+            payload["error"] = "; ".join(errors)
 
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, ensure_ascii=False) + "\n")

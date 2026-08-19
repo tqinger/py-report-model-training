@@ -196,6 +196,7 @@ def main(
         lr_scheduler_kwargs=training.lr_scheduler_kwargs,
         per_device_train_batch_size=training.per_device_train_batch_size,
         per_device_eval_batch_size=training.per_device_eval_batch_size,
+        dataloader_num_workers=training.dataloader_num_workers,
         gradient_accumulation_steps=training.gradient_accumulation_steps,
         warmup_ratio=training.warmup_ratio,
         max_grad_norm=training.max_grad_norm,

@@ -35,6 +35,7 @@ def test_tongue_qlora_hyperparameters_are_loaded_from_toml_config():
 
     assert config.training.learning_rate == 5e-5
     assert config.training.gradient_accumulation_steps == 8
+    assert config.training.dataloader_num_workers == 8
     assert config.training.save_steps == 100
     assert config.training.save_total_limit == 1
     assert config.lora.target_modules == (
@@ -70,6 +71,7 @@ def test_new_jsonl_task_configs_match_their_dataset_sequence_lengths():
         config = load_tongue_qlora_config(Path("configs") / filename)
         assert config.training.max_length == max_length
         assert config.training.optim == "adamw_torch"
+        assert config.training.dataloader_num_workers == 8
 
 
 def test_tongue_qlora_config_rejects_incompatible_save_and_eval_strategies(tmp_path: Path):

@@ -358,9 +358,9 @@ echo "PID: $!"
 
 ## GPU 运行指标日志
 
-每个训练入口会在每个 `training.logging_steps` 记录一次 GPU 遥测，并在训练结束时补记最后一次数据。数据以 JSONL 形式追加保存到输出目录的 `gpu_metrics.jsonl`；恢复训练时会继续追加到同一个文件。每条记录包含时间、全局 step、epoch，以及每张 GPU 的温度、利用率、已用/总显存、功耗/功耗上限、风扇转速和核心/显存频率。
+每个训练入口会在每个 `training.logging_steps` 记录一次硬件遥测，并在训练结束时补记最后一次数据。数据以 JSONL 形式追加保存到输出目录的 `gpu_metrics.jsonl`；恢复训练时会继续追加到同一个文件。每条记录包含时间、全局 step、epoch、系统整体和训练进程的 CPU 利用率、当前频率、系统内存占用，以及操作系统可读取的 CPU 温度传感器；还包括每张 GPU 的温度、利用率、已用/总显存、功耗/功耗上限、风扇转速和核心/显存频率。未暴露 CPU 温度传感器的系统会记录空的 `temperatures_c` 列表。
 
-若 `nvidia-smi` 不可用或采集失败，训练不会中断，对应 JSON 行会写入 `error` 字段。Linux 上可实时查看：
+若 CPU 或 `nvidia-smi` 指标不可用、采集失败，训练不会中断，对应 JSON 行会写入 `error` 字段。Linux 上可实时查看：
 
 ```bash
 tail -f artifacts/qwen3-4b-wutai-20-qlora/gpu_metrics.jsonl

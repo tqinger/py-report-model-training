@@ -84,6 +84,7 @@ class TrainingHyperparameters:
     gradient_checkpointing: bool
     gradient_checkpointing_use_reentrant: bool
     report_to: str
+    dataloader_num_workers: int = 8
     lr_scheduler_type: str = "linear"
     lr_scheduler_kwargs: dict[str, Any] | None = None
 
@@ -98,6 +99,8 @@ class TrainingHyperparameters:
             raise ValueError("training.per_device_train_batch_size must be positive")
         if self.per_device_eval_batch_size <= 0:
             raise ValueError("training.per_device_eval_batch_size must be positive")
+        if self.dataloader_num_workers < 0:
+            raise ValueError("training.dataloader_num_workers must be non-negative")
         if self.gradient_accumulation_steps <= 0:
             raise ValueError("training.gradient_accumulation_steps must be positive")
         if not 0 <= self.warmup_ratio < 1:

@@ -10,7 +10,7 @@ from tcm_qwen_eval.dataset import load_jsonl_sft_splits
 if __name__ == "__main__":
     main(
         description="Fine-tune a Qwen3-4B holistic TCM-report adapter with QLoRA.",
-        default_config=Path("configs/holistic_50k_qlora.toml"),
+        default_config=Path("configs/medical_lora/holistic_50k_qlora.toml"),
         default_data_dir=Path("data/holistic_50k"),
         default_output_dir=Path("artifacts/qwen3-4b-holistic-50k-qlora"),
         load_pre_split_examples=partial(

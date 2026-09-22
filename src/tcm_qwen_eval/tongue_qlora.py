@@ -175,7 +175,7 @@ def resolve_model_source(model_name: str, cache_dir: Path) -> str:
 
 def chat_prompt(tokenizer: Any, messages: list[dict[str, str]]) -> str:
     """Render the exact inference prefix, with Qwen3 thinking disabled."""
-    prompt_messages = messages[:2]
+    prompt_messages = messages[:-1]
     try:
         return tokenizer.apply_chat_template(
             prompt_messages, tokenize=False, add_generation_prompt=True, enable_thinking=False

@@ -71,11 +71,12 @@ def parse_args(
 def main(
     *,
     description: str = "Fine-tune a Qwen3-4B tongue adapter with QLoRA.",
-    default_config: Path = Path("configs/tongue_qlora.toml"),
+    default_config: Path = Path("configs/medical_lora/tongue_qlora.toml"),
     default_data_dir: Path = Path("data"),
     default_output_dir: Path = Path("artifacts/qwen3-4b-tongue-qlora"),
     split_examples: SplitExamples = split_tongue_examples,
     load_pre_split_examples: LoadPreSplitExamples | None = None,
+    pre_split_strategy: str = "provided train.jsonl/val.jsonl",
 ) -> None:
     args = parse_args(
         description=description,
@@ -97,7 +98,7 @@ def main(
     else:
         splits = load_pre_split_examples(args.data_dir)
         manifest = split_manifest(splits, training.seed)
-        manifest["split_strategy"] = "provided train.jsonl/val.jsonl"
+        manifest["split_strategy"] = pre_split_strategy
         manifest["data_dir"] = str(args.data_dir)
     write_json(args.output_dir / "split_manifest.json", manifest)
     model_source = resolve_model_source(args.model, args.cache_dir)

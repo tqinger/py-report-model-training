@@ -9,7 +9,7 @@ from tcm_qwen_eval.tongue_qlora import split_constitution_examples
 if __name__ == "__main__":
     main(
         description="Fine-tune a Qwen3-4B constitution-analysis adapter with QLoRA.",
-        default_config=Path("configs/constitution_qlora.toml"),
+        default_config=Path("configs/medical_lora/constitution_qlora.toml"),
         default_data_dir=Path("data/constitution-analysis"),
         default_output_dir=Path("artifacts/qwen3-4b-constitution-qlora"),
         split_examples=split_constitution_examples,

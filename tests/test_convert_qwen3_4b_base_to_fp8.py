@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path("scripts/convert_qwen3_4b_base_to_fp8.py")
+SCRIPT = Path("scripts/maintenance/convert_qwen3_4b_base_to_fp8.py")
 SPEC = spec_from_file_location("convert_qwen3_4b_base_to_fp8", SCRIPT)
 assert SPEC and SPEC.loader
 converter = module_from_spec(SPEC)

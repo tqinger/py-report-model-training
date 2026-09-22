@@ -88,7 +88,7 @@ BASE_BF16=/home/tan/py-report-model-training/artifacts/hf_cache/models--Qwen--Qw
 FP8_BASE=/home/tan/models/releases/qwen3-4b-fp8-20260812
 
 $HOME/.venvs/llm-compressor/bin/python \
-  /home/tan/py-report-model-training/scripts/convert_qwen3_4b_base_to_fp8.py \
+  /home/tan/py-report-model-training/scripts/maintenance/convert_qwen3_4b_base_to_fp8.py \
   --model "$BASE_BF16" \
   --output-dir "$FP8_BASE" \
   --device cuda:0

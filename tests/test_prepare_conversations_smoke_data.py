@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 def _load_script_module():
-    path = Path("scripts/prepare_conversations_smoke_data.py")
+    path = Path("scripts/maintenance/prepare_conversations_smoke_data.py")
     spec = importlib.util.spec_from_file_location("prepare_conversations_smoke_data", path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)

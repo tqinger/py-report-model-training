@@ -1,6 +1,6 @@
 # Qwen3 舌象 QLoRA 训练与评测
 
-完整的前台、后台、日志与恢复训练命令见 [TRAINING_COMMANDS.md](TRAINING_COMMANDS.md)。
+完整的前台、后台、日志与恢复训练命令见 [TRAINING_COMMANDS.md](TRAINING_COMMANDS.md)；外部数据目录、任务与 Adapter 的对应关系见 [docs/datasets.md](docs/datasets.md)。
 
 ## 舌象 QLoRA 微调
 
@@ -12,11 +12,11 @@ uv sync --group dev
 
 # 在项目根目录启动训练
 $env:PYTHONPATH = "src"
-uv run python scripts/train_tongue_qlora.py
+uv run python scripts/train/train_tongue_qlora.py
 
 # 训练完成后，在独立测试集上生成自动指标与人工评分表
 $env:PYTHONPATH = "src"
-uv run python scripts/evaluate_tongue_qlora.py
+uv run python scripts/evaluate/evaluate_tongue_qlora.py
 ```
 
 ### 后台训练与进度日志（Windows PowerShell）
@@ -24,7 +24,7 @@ uv run python scripts/evaluate_tongue_qlora.py
 需要关闭终端后继续训练时，用以下启动器代替前台训练命令：
 
 ```powershell
-.\scripts\start_tongue_qlora_training.ps1
+.\scripts\train\start_tongue_qlora_training.ps1
 ```
 
 启动器会将训练作为独立后台进程运行，终端关闭不会中断训练。每次启动会在 `artifacts/logs/` 生成一对带时间戳的日志文件：`tongue_qlora_*.out.log` 记录训练进度，`tongue_qlora_*.err.log` 记录警告、错误和异常堆栈。训练输出未缓冲写入，因此可以在另一个 PowerShell 窗口实时查看进度：
@@ -42,7 +42,7 @@ Get-Content -LiteralPath artifacts\logs\tongue_qlora_<timestamp>.err.log -Tail 5
 它支持与训练脚本相同的常用运行参数，例如从 checkpoint 恢复或在模型未缓存时允许下载：
 
 ```powershell
-.\scripts\start_tongue_qlora_training.ps1 `
+.\scripts\train\start_tongue_qlora_training.ps1 `
   -ResumeFromCheckpoint artifacts\qwen3-4b-tongue-qlora\checkpoint-120 `
   -AllowDownload
 ```
@@ -77,9 +77,9 @@ Adapter、训练配置、切分清单和最佳验证 checkpoint 均写入 `artif
 
 ```powershell
 $env:PYTHONPATH = "src"
-Copy-Item configs/tongue_qlora.toml configs/tongue_qlora_local.toml
+Copy-Item configs/medical_lora/tongue_qlora.toml configs/medical_lora/tongue_qlora_local.toml
 # Edit training.num_train_epochs and training.learning_rate in the copied TOML file.
-uv run python scripts/train_tongue_qlora.py --config configs/tongue_qlora_local.toml
+uv run python scripts/train/train_tongue_qlora.py --config configs/medical_lora/tongue_qlora_local.toml
 ```
 
 模型默认只从本机 Hugging Face 缓存读取；缓存缺失时在命令末尾添加 `--allow-download`。
@@ -89,13 +89,13 @@ uv run python scripts/train_tongue_qlora.py --config configs/tongue_qlora_local.
 使用下载脚本可将指定参数量的 Qwen3 权重下载到训练和评测共用的 `artifacts/hf_cache`。支持 `0.6B`、`1.7B` 和 `4B`，默认下载训练所需的 `4B`：
 
 ```powershell
-uv run python scripts/download_qwen3_weights.py --size 4B
+uv run python scripts/maintenance/download_qwen3_weights.py --size 4B
 ```
 
 下载较小模型时替换参数量，例如：
 
 ```powershell
-uv run python scripts/download_qwen3_weights.py --size 1.7B
+uv run python scripts/maintenance/download_qwen3_weights.py --size 1.7B
 ```
 
 ### 全组合对话数据训练
@@ -103,8 +103,8 @@ uv run python scripts/download_qwen3_weights.py --size 1.7B
 `data/conversations` 的 101,760 条样本覆盖 10,176 种舌象组合，每种组合含 `r01` 至 `r10` 十个患者信息变体。训练会保留每种组合，并固定将 `r01`–`r08` 用于训练、`r09` 用于验证、`r10` 用于测试：
 
 ```powershell
-uv run python scripts/train_tongue_qlora.py `
-  --config configs/tongue_qlora_conversations.toml `
+uv run python scripts/train/train_tongue_qlora.py `
+  --config configs/medical_lora/tongue_qlora_conversations.toml `
   --data-dir data/conversations `
   --output-dir artifacts/qwen3-4b-tongue-conversations-qlora
 ```
@@ -112,7 +112,7 @@ uv run python scripts/train_tongue_qlora.py `
 对应评测命令：
 
 ```powershell
-uv run python scripts/evaluate_tongue_qlora.py `
+uv run python scripts/evaluate/evaluate_tongue_qlora.py `
   --data-dir data/conversations `
   --adapter artifacts/qwen3-4b-tongue-conversations-qlora `
   --output artifacts/qwen3-4b-tongue-conversations-evaluation.xlsx `
@@ -124,14 +124,14 @@ uv run python scripts/evaluate_tongue_qlora.py `
 以下命令会按固定种子抽取 10 个完整组合，并复制到 `data/smoke/conversations`。该小集共 100 条样本，切分后含 80 条训练、10 条验证和 10 条测试样本；不会修改原始数据：
 
 ```powershell
-uv run python scripts/prepare_conversations_smoke_data.py
+uv run python scripts/maintenance/prepare_conversations_smoke_data.py
 ```
 
 使用同一份配置验证完整训练链路，并将冒烟产物写入独立目录：
 
 ```powershell
-uv run python scripts/train_tongue_qlora.py `
-  --config configs/tongue_qlora_conversations.toml `
+uv run python scripts/train/train_tongue_qlora.py `
+  --config configs/medical_lora/tongue_qlora_conversations.toml `
   --data-dir data/smoke/conversations `
   --output-dir artifacts/qwen3-4b-tongue-conversations-smoke
 ```

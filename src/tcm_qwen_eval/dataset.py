@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 EXPECTED_ROLES = ("system", "user", "assistant")
+USER_ASSISTANT_ROLES = ("user", "assistant")
+SUPPORTED_ROLE_SEQUENCES = (EXPECTED_ROLES, USER_ASSISTANT_ROLES)
 ACTUAL_TRAINING_DATA_DIR = Path(r"D:\shanjiyun\py-report-system\data\training\llm_calls")
 CONVERSATIONS_DIRECTORY = "conversations"
 TONGUE_DOMAIN = "tongue-analysis"
@@ -18,6 +20,9 @@ CONSTITUTION_COMBINED_TASK = "constitution_combined_analysis"
 CONVERSATION_FILENAME = re.compile(r"tongue-(?P<combination>\d+)-r(?P<round>0[1-9]|10)-without")
 SUPPORTED_DOMAINS = frozenset(
     {"case-polish", "constitution-analysis", "holistic-tcm-report", TONGUE_DOMAIN}
+)
+HOLISTIC_REPORT_SECTION_TASKS = frozenset(
+    {"report_parts_1_2", "report_parts_3_4", "report_part_5"}
 )
 
 
@@ -41,15 +46,15 @@ class Example:
 
     @property
     def system(self) -> str:
-        return self.messages[0]["content"]
+        return self.messages[0]["content"] if self.messages[0]["role"] == "system" else ""
 
     @property
     def user(self) -> str:
-        return self.messages[1]["content"]
+        return self.messages[-2]["content"]
 
     @property
     def reference(self) -> str:
-        return self.messages[2]["content"]
+        return self.messages[-1]["content"]
 
 
 def _task_name(domain: str, user: str) -> str:
@@ -58,6 +63,8 @@ def _task_name(domain: str, user: str) -> str:
         return CONSTITUTION_COMBINED_TASK
     task_markers = {
         "case-polish": (
+            ("任务：润色现病史", "present_illness_polish"),
+            ("任务：生成主诉", "chief_complaint"),
             ("前后重复", "deduplicate_polish"),
             ("主病", "chief_complaint"),
             ("疾病条目", "present_illness_polish"),
@@ -110,8 +117,12 @@ def _normalized_messages(path: Path) -> list[dict[str, str]]:
     with path.open(encoding="utf-8") as handle:
         record = json.load(handle)
     messages = record.get("messages")
-    if not isinstance(messages, list) or tuple(item.get("role") for item in messages) != EXPECTED_ROLES:
-        raise ValueError(f"{path}: expected system/user/assistant messages")
+    if (
+        not isinstance(messages, list)
+        or not all(isinstance(item, dict) for item in messages)
+        or tuple(item.get("role") for item in messages) not in SUPPORTED_ROLE_SEQUENCES
+    ):
+        raise ValueError(f"{path}: expected system/user/assistant or user/assistant messages")
     normalized = [
         {"role": message["role"], "content": str(message.get("content", "")).strip()}
         for message in messages
@@ -134,12 +145,11 @@ def _normalized_jsonl_messages(path: Path):
             messages = record.get("messages") if isinstance(record, dict) else None
             if (
                 not isinstance(messages, list)
-                or len(messages) != len(EXPECTED_ROLES)
                 or any(not isinstance(item, dict) for item in messages)
-                or tuple(item.get("role") for item in messages) != EXPECTED_ROLES
+                or tuple(item.get("role") for item in messages) not in SUPPORTED_ROLE_SEQUENCES
             ):
                 raise ValueError(
-                    f"{path}:{line_number}: expected system/user/assistant messages"
+                    f"{path}:{line_number}: expected system/user/assistant or user/assistant messages"
                 )
             normalized = [
                 {"role": message["role"], "content": str(message.get("content", "")).strip()}
@@ -172,7 +182,7 @@ def load_jsonl_sft_splits(
             raise ValueError(f"{data_dir}: missing required {path.name}")
         examples: list[Example] = []
         for line_number, messages in _normalized_jsonl_messages(path):
-            user = messages[1]["content"]
+            user = messages[-2]["content"]
             examples.append(
                 Example(
                     id=f"{data_dir.name}/{split_name}/{line_number:06d}",
@@ -186,6 +196,47 @@ def load_jsonl_sft_splits(
             raise ValueError(f"{path}: contains no SFT records")
         result[split_name] = examples
     return result
+
+
+def load_holistic_section_sft_splits(
+    data_dir: Path,
+    *,
+    seed: int = 20260817,
+    validation_fraction: float = 0.01,
+) -> dict[str, list[Example]]:
+    """Load one raw holistic-report section and create a source-grouped train/val split.
+
+    The supplied simplified-prompt data keeps one Chat SFT record per JSON file
+    and separates report sections into sibling directories.  A section adapter
+    must train on only one task, while records sharing the same four-diagnosis
+    source facts must remain in the same split.
+    """
+    if not 0 < validation_fraction < 1:
+        raise ValueError("validation_fraction must be between 0 and 1")
+
+    paths = sorted(data_dir.glob("*.json"))
+    if not paths:
+        raise ValueError(f"{data_dir}: contains no JSON SFT records")
+    examples = _load_domain_examples("holistic-tcm-report", paths)
+    tasks = {example.task for example in examples}
+    if len(tasks) != 1 or not tasks <= HOLISTIC_REPORT_SECTION_TASKS:
+        raise ValueError(
+            f"{data_dir}: expected exactly one holistic report section task, got {sorted(tasks)}"
+        )
+
+    group_ids = sorted({example.group_id for example in examples})
+    if len(group_ids) < 2:
+        raise ValueError(f"{data_dir}: at least two distinct source groups are required")
+    random.Random(seed).shuffle(group_ids)
+    validation_count = max(1, round(len(group_ids) * validation_fraction))
+    validation_groups = set(group_ids[:validation_count])
+    splits = {
+        "train": [example for example in examples if example.group_id not in validation_groups],
+        "validation": [example for example in examples if example.group_id in validation_groups],
+    }
+    if not splits["train"] or not splits["validation"]:
+        raise ValueError(f"{data_dir}: split produced an empty train or validation set")
+    return splits
 
 
 def _load_conversation_examples(data_dir: Path) -> list[Example]:
@@ -216,7 +267,7 @@ def _load_domain_examples(domain: str, paths: list[Path]) -> list[Example]:
     examples: list[Example] = []
     for path in paths:
         normalized = _normalized_messages(path)
-        user = normalized[1]["content"]
+        user = normalized[-2]["content"]
         examples.append(
             Example(
                 id=f"{domain}/{path.stem}",

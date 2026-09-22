@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Config = "configs/tongue_qlora.toml",
+    [string]$Config = "configs/medical_lora/tongue_qlora.toml",
     [string]$DataDir = "data",
     [string]$Model = "Qwen/Qwen3-4B",
     [string]$OutputDir = "artifacts/qwen3-4b-tongue-qlora",
@@ -12,7 +12,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$projectRoot = Split-Path -Parent $PSScriptRoot
+$projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $logDir = Join-Path $projectRoot "artifacts\logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
@@ -24,7 +24,7 @@ $arguments = @(
     "run",
     "python",
     "-u",
-    "scripts/train_tongue_qlora.py",
+    "scripts/train/train_tongue_qlora.py",
     "--config",
     $Config,
     "--data-dir",

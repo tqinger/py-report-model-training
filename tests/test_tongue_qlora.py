@@ -4,7 +4,7 @@ import torch
 from openpyxl import load_workbook
 
 from tcm_qwen_eval.checkpoints import resolve_resume_checkpoint
-from tcm_qwen_eval.dataset import load_examples
+from tcm_qwen_eval.dataset import Example, load_examples
 from tcm_qwen_eval.tongue_qlora import (
     CausalDataCollator,
     encode_sft_example,
@@ -31,7 +31,7 @@ class FakeTokenizer:
 
 
 def test_tongue_qlora_hyperparameters_are_loaded_from_toml_config():
-    config = load_tongue_qlora_config(Path("configs/tongue_qlora.toml"))
+    config = load_tongue_qlora_config(Path("configs/medical_lora/tongue_qlora.toml"))
 
     assert config.training.learning_rate == 5e-5
     assert config.training.gradient_accumulation_steps == 8
@@ -51,7 +51,9 @@ def test_tongue_qlora_hyperparameters_are_loaded_from_toml_config():
 
 
 def test_conversations_1_7b_config_uses_a_learning_rate_floor():
-    config = load_tongue_qlora_config(Path("configs/tongue_qlora_conversations_1_7b.toml"))
+    config = load_tongue_qlora_config(
+        Path("configs/medical_lora/tongue_qlora_conversations_1_7b.toml")
+    )
 
     assert config.training.learning_rate == 3e-5
     assert config.training.lr_scheduler_type == "cosine_with_min_lr"
@@ -68,16 +70,69 @@ def test_new_jsonl_task_configs_match_their_dataset_sequence_lengths():
     }
 
     for filename, max_length in expected.items():
-        config = load_tongue_qlora_config(Path("configs") / filename)
+        config = load_tongue_qlora_config(Path("configs/medical_lora") / filename)
         assert config.training.max_length == max_length
         assert config.training.optim == "adamw_torch"
         assert config.training.dataloader_num_workers == 8
 
 
+def test_holistic_report_section_windows_configs_are_16gb_safe():
+    filenames = (
+        "holistic_report_parts_1_2_qlora_windows.toml",
+        "holistic_report_parts_3_4_qlora_windows.toml",
+        "holistic_report_part_5_qlora_windows.toml",
+    )
+
+    for filename in filenames:
+        config = load_tongue_qlora_config(Path("configs/medical_lora") / filename)
+        assert config.training.max_length == 1536
+        assert config.training.per_device_train_batch_size == 1
+        assert config.training.gradient_accumulation_steps == 8
+        assert config.training.dataloader_num_workers == 0
+        assert config.training.optim == "adamw_torch"
+
+
+def test_wellness_lora_compact_configs_match_platform_recipes():
+    expected = {
+        "tongue_qlora.toml": (512, 1.0, 4, 2, 8),
+        "tongue_qlora_windows.toml": (512, 1.0, 1, 8, 0),
+        "tongue_constitution_qlora.toml": (1024, 1.0, 4, 2, 8),
+        "tongue_constitution_qlora_windows.toml": (1024, 1.0, 1, 8, 0),
+        "holistic_qlora.toml": (1024, 1.0, 4, 2, 8),
+        "holistic_qlora_windows.toml": (1024, 1.0, 1, 8, 0),
+        "wutai_qlora.toml": (4096, 5.0, 2, 4, 8),
+        "wutai_qlora_windows.toml": (4096, 5.0, 1, 8, 0),
+    }
+
+    for filename, (max_length, epochs, batch_size, accumulation, workers) in expected.items():
+        config = load_tongue_qlora_config(Path("configs/wellness_lora_compact") / filename)
+
+        assert config.training.max_length == max_length
+        assert config.training.num_train_epochs == epochs
+        assert config.training.per_device_train_batch_size == batch_size
+        assert config.training.gradient_accumulation_steps == accumulation
+        assert config.training.dataloader_num_workers == workers
+        assert config.training.optim == "adamw_torch"
+        assert config.training.lr_scheduler_type == "cosine_with_min_lr"
+        assert config.training.lr_scheduler_kwargs == {"min_lr_rate": 0.2}
+
+
+def test_case_polish_windows_config_matches_the_system_free_sft_dataset():
+    config = load_tongue_qlora_config(
+        Path("configs/medical_lora/case_polish_qlora_windows.toml")
+    )
+
+    assert config.training.max_length == 1536
+    assert config.training.num_train_epochs == 5.0
+    assert config.training.per_device_train_batch_size == 1
+    assert config.training.gradient_accumulation_steps == 8
+    assert config.training.dataloader_num_workers == 0
+
+
 def test_tongue_qlora_config_rejects_incompatible_save_and_eval_strategies(tmp_path: Path):
     config_path = tmp_path / "invalid.toml"
     config_path.write_text(
-        Path("configs/tongue_qlora.toml")
+        Path("configs/medical_lora/tongue_qlora.toml")
         .read_text(encoding="utf-8")
         .replace('save_strategy = "steps"', 'save_strategy = "epoch"'),
         encoding="utf-8",
@@ -94,7 +149,7 @@ def test_tongue_qlora_config_rejects_incompatible_save_and_eval_strategies(tmp_p
 def test_tongue_qlora_config_rejects_non_positive_save_steps(tmp_path: Path):
     config_path = tmp_path / "invalid.toml"
     config_path.write_text(
-        Path("configs/tongue_qlora.toml")
+        Path("configs/medical_lora/tongue_qlora.toml")
         .read_text(encoding="utf-8")
         .replace("save_steps = 100", "save_steps = 0"),
         encoding="utf-8",
@@ -167,6 +222,25 @@ def test_sft_labels_mask_fixed_and_dynamic_prompt_tokens():
     assert first_target > 0
     assert encoded["labels"][:first_target] == [-100] * first_target
     assert encoded["labels"][first_target:] == encoded["input_ids"][first_target:]
+
+
+def test_sft_labels_mask_a_system_free_prompt():
+    example = Example(
+        id="case-polish/example",
+        domain="case-polish",
+        task="chief_complaint",
+        group_id="case-polish-example",
+        messages=[
+            {"role": "user", "content": "任务：生成主诉"},
+            {"role": "assistant", "content": "胸痛3天"},
+        ],
+    )
+
+    encoded = encode_sft_example(FakeTokenizer(), example, max_length=4096)
+
+    first_target = next(index for index, label in enumerate(encoded["labels"]) if label != -100)
+    assert first_target == len("PROMPT: 任务：生成主诉")
+    assert encoded["labels"][:first_target] == [-100] * first_target
 
 
 def test_collator_pads_labels_without_unmasking_prompt():
